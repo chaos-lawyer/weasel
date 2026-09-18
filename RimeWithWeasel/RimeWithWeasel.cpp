@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include <logging.h>
 #include <RimeWithWeasel.h>
 #include <StringAlgorithm.hpp>
@@ -41,6 +41,8 @@ RimeWithWeaselHandler::RimeWithWeaselHandler(UI* ui)
       m_current_dark_mode(false),
       m_global_ascii_mode(false),
       m_show_notifications_time(1200),
+      m_base_configured_layout_type(UIStyle::LAYOUT_VERTICAL),
+      m_base_fullscreen(false),
       _UpdateUICallback(NULL) {
   m_ui->InServer() = true;
   rime_api = rime_get_api();
@@ -133,6 +135,20 @@ void RimeWithWeaselHandler::Initialize() {
         }
       }
       m_base_style = m_ui->style();
+      m_base_configured_layout_type = m_base_style.layout_type;
+      Bool is_fs = False;
+      rime_api->config_get_bool(&config, "style/fullscreen", &is_fs);
+      m_base_fullscreen = !!is_fs;
+      _LoadDynamicLayoutConfig(&config, m_base_dynamic_layout, m_base_style);
+      if (m_base_configured_layout_type == UIStyle::LAYOUT_AUTO) {
+        m_base_style.layout_type =
+            (m_base_dynamic_layout.default_layout == weasel::CandidateLayout::Vertical)
+                ? (m_base_fullscreen ? UIStyle::LAYOUT_VERTICAL_FULLSCREEN
+                                     : UIStyle::LAYOUT_VERTICAL)
+                : (m_base_fullscreen ? UIStyle::LAYOUT_HORIZONTAL_FULLSCREEN
+                                     : UIStyle::LAYOUT_HORIZONTAL);
+        m_ui->style().layout_type = m_base_style.layout_type;
+      }
     }
     Bool global_ascii = false;
     if (rime_api->config_get_bool(&config, "global_ascii", &global_ascii))
@@ -188,6 +204,9 @@ DWORD RimeWithWeaselHandler::AddSession(LPWSTR buffer, EatLine eat) {
   SessionStatus& session_status = new_session_status(ipc_id);
   session_status.style = m_base_style;
   session_status.session_id = session_id;
+  session_status.configured_layout_type = m_base_configured_layout_type;
+  session_status.fullscreen = m_base_fullscreen;
+  session_status.dynamic_layout_config = m_base_dynamic_layout;
   _ReadClientInfo(ipc_id, buffer);
 
   RIME_STRUCT(RimeStatus, status);
@@ -534,6 +553,8 @@ void RimeWithWeaselHandler::_UpdateUI(WeaselSessionId ipc_id) {
   _GetStatus(weasel_status, ipc_id, weasel_context);
 
   SessionStatus& session_status = get_session_status(ipc_id);
+  _GetContext(weasel_context, session_id);
+  _ResolveLayoutForSession(session_status, weasel_context.cinfo);
   if (rime_api->get_option(session_id, "inline_preedit"))
     session_status.style.client_caps |= INLINE_PREEDIT_CAPABLE;
   else
@@ -569,6 +590,25 @@ void RimeWithWeaselHandler::_LoadSchemaSpecificSettings(
   SessionStatus& session_status = get_session_status(ipc_id);
   session_status.style = m_ui->style();
   UIStyle& style = session_status.style;
+  session_status.configured_layout_type = style.layout_type;
+  Bool is_fs = m_base_fullscreen ? True : False;
+  rime_api->config_get_bool(&config, "style/fullscreen", &is_fs);
+  session_status.fullscreen = !!is_fs;
+  _LoadDynamicLayoutConfig(&config, session_status.dynamic_layout_config, style);
+  if (session_status.configured_layout_type == UIStyle::LAYOUT_AUTO &&
+      session_status.dynamic_layout_config.rules.empty() &&
+      !m_base_dynamic_layout.rules.empty()) {
+    session_status.dynamic_layout_config = m_base_dynamic_layout;
+  }
+  if (session_status.configured_layout_type == UIStyle::LAYOUT_AUTO) {
+    style.layout_type =
+        (session_status.dynamic_layout_config.default_layout == weasel::CandidateLayout::Vertical)
+            ? (session_status.fullscreen ? UIStyle::LAYOUT_VERTICAL_FULLSCREEN
+                                         : UIStyle::LAYOUT_VERTICAL)
+            : (session_status.fullscreen ? UIStyle::LAYOUT_HORIZONTAL_FULLSCREEN
+                                         : UIStyle::LAYOUT_HORIZONTAL);
+    m_ui->style().layout_type = style.layout_type;
+  }
   // load schema color style config
   const int BUF_SIZE = 255;
   char buffer[BUF_SIZE + 1] = {0};
@@ -794,6 +834,7 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
     if (has_candidates) {
       _GetCandidateInfo(cinfo, ctx);
     }
+    _ResolveLayoutForSession(session_status, cinfo);
     if (is_composing) {
       const auto& preedit = ctx.composition.preedit;
       const auto& start = ctx.composition.sel_start;
@@ -1160,6 +1201,138 @@ void RimeWithWeaselHandler::_UpdateShowNotifications(RimeConfig* config,
   }
 }
 
+void RimeWithWeaselHandler::_LoadDynamicLayoutConfig(
+    RimeConfig* config,
+    weasel::DynamicLayoutConfig& dlc,
+    const weasel::UIStyle& style) {
+  dlc.rules.clear();
+  dlc.enabled = (style.layout_type == UIStyle::LAYOUT_AUTO);
+  weasel::CandidateLayout default_layout = weasel::CandidateLayout::Horizontal;
+  const int BUF_SIZE = 255;
+  char buffer[BUF_SIZE + 1] = {0};
+  if (rime_api->config_get_string(config, "dynamic_layout/default", buffer, BUF_SIZE)) {
+    if (strcmp(buffer, "vertical") == 0) {
+      default_layout = weasel::CandidateLayout::Vertical;
+    } else if (strcmp(buffer, "horizontal") == 0) {
+      default_layout = weasel::CandidateLayout::Horizontal;
+    } else {
+      LOG(WARNING) << "DynamicLayout: unknown default layout '" << buffer
+                   << "', falling back to horizontal";
+    }
+  }
+  dlc.default_layout = default_layout;
+
+  if (!dlc.enabled) {
+    return;
+  }
+
+  ForEachRimeList(config, "dynamic_layout/rules", [&](const char* item_path) {
+    weasel::DynamicLayoutRule rule;
+    char val_buf[BUF_SIZE + 1] = {0};
+
+    // Layout target (required for a valid rule)
+    std::string layout_path = std::string(item_path) + "/layout";
+    if (!rime_api->config_get_string(config, layout_path.c_str(), val_buf, BUF_SIZE)) {
+      LOG(WARNING) << "DynamicLayout: rule at " << item_path << " missing 'layout' field, ignored";
+      return;
+    }
+    if (strcmp(val_buf, "vertical") == 0) {
+      rule.target_layout = weasel::CandidateLayout::Vertical;
+    } else if (strcmp(val_buf, "horizontal") == 0) {
+      rule.target_layout = weasel::CandidateLayout::Horizontal;
+    } else {
+      LOG(WARNING) << "DynamicLayout: unknown rule layout '" << val_buf << "' at " << item_path << ", ignored";
+      return;
+    }
+
+    // 1. Check option rule
+    std::string option_path = std::string(item_path) + "/option";
+    if (rime_api->config_get_string(config, option_path.c_str(), val_buf, BUF_SIZE)) {
+      rule.type = weasel::LayoutRuleType::Option;
+      rule.option_name = val_buf;
+      Bool bool_val = True;
+      std::string value_path = std::string(item_path) + "/value";
+      if (rime_api->config_get_bool(config, value_path.c_str(), &bool_val)) {
+        rule.option_value = !!bool_val;
+      } else {
+        rule.option_value = true;
+      }
+      dlc.rules.push_back(rule);
+      return;
+    }
+
+    // 2. Check candidate_max_text_length_gt rule
+    std::string max_len_path = std::string(item_path) + "/candidate_max_text_length_gt";
+    int int_val = 0;
+    if (rime_api->config_get_int(config, max_len_path.c_str(), &int_val)) {
+      if (int_val >= 0) {
+        rule.type = weasel::LayoutRuleType::CandidateMaxTextLengthGt;
+        rule.threshold = int_val;
+        dlc.rules.push_back(rule);
+        return;
+      } else {
+        LOG(WARNING) << "DynamicLayout: negative threshold for candidate_max_text_length_gt at " << item_path << ", ignored";
+        return;
+      }
+    }
+
+    // 3. Check candidate_count_gt rule
+    std::string count_path = std::string(item_path) + "/candidate_count_gt";
+    if (rime_api->config_get_int(config, count_path.c_str(), &int_val)) {
+      if (int_val >= 0) {
+        rule.type = weasel::LayoutRuleType::CandidateCountGt;
+        rule.threshold = int_val;
+        dlc.rules.push_back(rule);
+        return;
+      } else {
+        LOG(WARNING) << "DynamicLayout: negative threshold for candidate_count_gt at " << item_path << ", ignored";
+        return;
+      }
+    }
+
+    LOG(WARNING) << "DynamicLayout: rule at " << item_path << " has no recognized condition (option, candidate_max_text_length_gt, candidate_count_gt), ignored";
+  });
+}
+
+void RimeWithWeaselHandler::_ResolveLayoutForSession(
+    SessionStatus& session_status,
+    const weasel::CandidateInfo& cinfo) {
+  if (session_status.configured_layout_type != UIStyle::LAYOUT_AUTO) {
+    return;
+  }
+  RimeSessionId session_id = session_status.session_id;
+  auto option_getter = [this, session_id](const std::string& opt) -> bool {
+    return rime_api->get_option(session_id, opt.c_str()) != 0;
+  };
+
+  weasel::CandidateLayout resolved = weasel::ResolveCandidateLayout(
+      cinfo,
+      session_status.dynamic_layout_config.default_layout,
+      session_status.dynamic_layout_config,
+      option_getter);
+
+  UIStyle::LayoutType target_type = UIStyle::LAYOUT_HORIZONTAL;
+  if (resolved == weasel::CandidateLayout::Vertical) {
+    target_type = session_status.fullscreen
+                      ? UIStyle::LAYOUT_VERTICAL_FULLSCREEN
+                      : UIStyle::LAYOUT_VERTICAL;
+  } else {
+    target_type = session_status.fullscreen
+                      ? UIStyle::LAYOUT_HORIZONTAL_FULLSCREEN
+                      : UIStyle::LAYOUT_HORIZONTAL;
+  }
+
+  if (session_status.style.layout_type != target_type) {
+    DLOG(INFO) << "DynamicLayout: layout changed from "
+               << session_status.style.layout_type << " to " << target_type;
+    session_status.style.layout_type = target_type;
+    session_status.__synced = false;
+    if (m_ui) {
+      m_ui->style().layout_type = target_type;
+    }
+  }
+}
+
 // update ui's style parameters, ui has been check before referenced
 static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
   UIStyle& style(ui->style());
@@ -1263,12 +1436,13 @@ static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
   _RimeGetIntStr(config, "style/layout/max_height", style.max_height, 0, 0,
                  _abs);
   // layout (alternative to style/horizontal)
-  static constexpr Array<UIStyle::LayoutType, 5> _layoutArr = {
+  static constexpr Array<UIStyle::LayoutType, 6> _layoutArr = {
       {{"vertical", UIStyle::LAYOUT_VERTICAL},
        {"horizontal", UIStyle::LAYOUT_HORIZONTAL},
        {"vertical_text", UIStyle::LAYOUT_VERTICAL_TEXT},
        {"vertical+fullscreen", UIStyle::LAYOUT_VERTICAL_FULLSCREEN},
-       {"horizontal+fullscreen", UIStyle::LAYOUT_HORIZONTAL_FULLSCREEN}}};
+       {"horizontal+fullscreen", UIStyle::LAYOUT_HORIZONTAL_FULLSCREEN},
+       {"auto", UIStyle::LAYOUT_AUTO}}};
   _RimeParseStringOptWithFallback(config, "style/layout/type",
                                   style.layout_type, _layoutArr,
                                   style.layout_type);

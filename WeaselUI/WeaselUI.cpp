@@ -162,7 +162,7 @@ void UI::UpdateInputPosition(RECT const& rc) {
 }
 
 void UI::Update(const Context& ctx, const Status& status) {
-  if (ctx_ == ctx && status_ == status)
+  if (ctx_ == ctx && status_ == status && !(style_ != ostyle_))
     return;
   ctx_ = ctx;
   status_ = status;

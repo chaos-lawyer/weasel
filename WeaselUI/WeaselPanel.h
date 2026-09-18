@@ -149,4 +149,5 @@ class WeaselPanel
   int m_hoverIndex = -1;
   HMONITOR m_hMonitor = NULL;
   bool m_redraw_by_monitor_change = false;
+  UIStyle::LayoutType m_last_layout_type;
 };

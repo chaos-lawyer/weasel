@@ -1,9 +1,12 @@
-﻿#pragma once
+#pragma once
 
 #include <string>
 #include <vector>
+#if __has_include(<boost/serialization/vector.hpp>)
 #include <boost/serialization/vector.hpp>
 #include <boost/serialization/string.hpp>
+#define WEASEL_HAS_BOOST_SERIALIZATION 1
+#endif
 
 namespace weasel {
 
@@ -209,6 +212,7 @@ struct UIStyle {
     LAYOUT_VERTICAL_TEXT,
     LAYOUT_VERTICAL_FULLSCREEN,
     LAYOUT_HORIZONTAL_FULLSCREEN,
+    LAYOUT_AUTO,
     LAYOUT_TYPE_LAST
   };
 
@@ -424,6 +428,7 @@ struct UIStyle {
   }
 };
 }  // namespace weasel
+#ifdef WEASEL_HAS_BOOST_SERIALIZATION
 namespace boost {
 namespace serialization {
 template <typename Archive>
@@ -534,3 +539,4 @@ void serialize(Archive& ar, weasel::TextRange& s, const unsigned int version) {
 }
 }  // namespace serialization
 }  // namespace boost
+#endif

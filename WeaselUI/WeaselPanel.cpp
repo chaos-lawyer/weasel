@@ -67,6 +67,7 @@ WeaselPanel::WeaselPanel(weasel::UI& ui)
       hide_candidates(false),
       pDWR(ui.pdwr()),
       _UICallback(ui.uiCallback()),
+      m_last_layout_type(UIStyle::LAYOUT_TYPE_LAST),
       _m_gdiplusToken(0) {
   m_iconDisabled.LoadIconW(IDI_RELOAD, STATUS_ICON_SIZE, STATUS_ICON_SIZE,
                            LR_DEFAULTCOLOR);
@@ -121,6 +122,9 @@ void WeaselPanel::_CreateLayout() {
     } else if (m_style.layout_type == UIStyle::LAYOUT_HORIZONTAL ||
                m_style.layout_type == UIStyle::LAYOUT_HORIZONTAL_FULLSCREEN) {
       layout = new HorizontalLayout(m_style, m_ctx, m_status, pDWR);
+    } else {
+      // Fallback for LAYOUT_AUTO if not dynamically resolved
+      layout = new HorizontalLayout(m_style, m_ctx, m_status, pDWR);
     }
 
     if (IS_FULLSCREENLAYOUT(m_style)) {
@@ -173,7 +177,9 @@ void WeaselPanel::Refresh() {
     ReleaseDC(dc);
     _ResizeWindow();
     _RepositionWindow();
-    if (m_ctx != m_octx) {
+    bool layout_changed = (m_last_layout_type != m_style.layout_type);
+    m_last_layout_type = m_style.layout_type;
+    if (m_ctx != m_octx || layout_changed) {
       m_octx = m_ctx;
       RedrawWindow();
     }

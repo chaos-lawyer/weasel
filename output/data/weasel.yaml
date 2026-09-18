@@ -41,6 +41,7 @@ style:
   vertical_text_left_to_right: false
   vertical_text_with_wrap: false
   layout:
+    # type: auto       # vertical | horizontal | vertical_text | vertical+fullscreen | horizontal+fullscreen | auto
     align_type: center
     max_width: 0	#set 0 to disable max width
     min_width: 160
@@ -60,6 +61,18 @@ style:
     shadow_offset_y: 4
     linespacing: 0 # percentage of font point, 0 to disable
     baseline: 0 # percentage of font point, 0 to disable
+
+# 动态候选布局配置（需配合 style/layout/type: auto 使用）
+# dynamic_layout:
+#   default: horizontal    # 默认布局: horizontal | vertical
+#   rules:
+#     - option: vertical_layout
+#       value: true
+#       layout: vertical
+#     - candidate_max_text_length_gt: 20
+#       layout: vertical
+#     - candidate_count_gt: 6
+#       layout: vertical
 
 preset_color_schemes:
   aqua:

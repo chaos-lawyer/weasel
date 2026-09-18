@@ -5,6 +5,7 @@
 #include <string>
 #include <mutex>
 
+#include <DynamicCandidateLayout.h>
 #include <rime_api.h>
 
 struct CaseInsensitiveCompare {
@@ -23,10 +24,18 @@ typedef std::map<std::string, AppOptions, CaseInsensitiveCompare>
     AppOptionsByAppName;
 
 struct SessionStatus {
-  SessionStatus() : style(weasel::UIStyle()), __synced(false), session_id(0) {
+  SessionStatus()
+      : style(weasel::UIStyle()),
+        configured_layout_type(weasel::UIStyle::LAYOUT_VERTICAL),
+        fullscreen(false),
+        __synced(false),
+        session_id(0) {
     RIME_STRUCT(RimeStatus, status);
   }
   weasel::UIStyle style;
+  weasel::UIStyle::LayoutType configured_layout_type;
+  bool fullscreen;
+  weasel::DynamicLayoutConfig dynamic_layout_config;
   RimeStatus status;
   bool __synced;
   RimeSessionId session_id;
@@ -82,6 +91,11 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
                   weasel::Context& ctx);
   void _GetContext(weasel::Context& ctx, RimeSessionId session_id);
   void _UpdateShowNotifications(RimeConfig* config, bool initialize = false);
+  void _LoadDynamicLayoutConfig(RimeConfig* config,
+                                weasel::DynamicLayoutConfig& dlc,
+                                const weasel::UIStyle& style);
+  void _ResolveLayoutForSession(SessionStatus& session_status,
+                                const weasel::CandidateInfo& cinfo);
 
   void _UpdateInlinePreeditStatus(WeaselSessionId ipc_id);
 
@@ -102,6 +116,9 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   std::string m_last_schema_id;
   std::string m_last_app_name;
   weasel::UIStyle m_base_style;
+  weasel::DynamicLayoutConfig m_base_dynamic_layout;
+  weasel::UIStyle::LayoutType m_base_configured_layout_type;
+  bool m_base_fullscreen;
   std::map<std::string, bool> m_show_notifications;
   std::map<std::string, bool> m_show_notifications_base;
   std::function<void()> _UpdateUICallback;
