@@ -1,4 +1,4 @@
-﻿【小狼毫】輸入法
+【小狼毫】輸入法
 ================
 
 基於 中州韻輸入法引擎／Rime Input Method Engine 等開源技術
@@ -46,6 +46,40 @@
 修改詞庫、配置文件後，須「重新部署」方可生效。
 
 定製 Rime 的方法，請參考 Wiki [《定製指南》](https://github.com/rime/home/wiki/CustomizationGuide)。如需定製 Weasel 獨有的樣式和行為，請參考本倉庫 [Wiki 頁面](https://github.com/rime/weasel/wiki)。
+
+動態候選佈局（Dynamic Candidate Layout）
+---------------------------------------
+
+小狼毫現已支援**動態候選佈局（Dynamic Candidate Layout）**能力。在連續輸入過程中，候選視窗可依據 Rime 上下文中的 Option 選項狀態、候選文字長度或可見候選數量，自動在橫排（Horizontal）與縱排（Vertical）佈局之間即時切換，且**無需切換方案、無需重啟服務、無黑屏與視窗閃爍**。
+
+### 1. 開啟方式與配置範例
+
+在 `weasel.custom.yaml` 或具體輸入方案中配置：
+
+```yaml
+patch:
+  style/layout/type: auto   # 開啟動態佈局模式（未配置時完全向後兼容靜態佈局）
+
+  dynamic_layout:
+    default: horizontal     # 預設佈局（未命中任何規則時使用）：horizontal | vertical
+    rules:
+      # 規則1：Option 規則（當特定 context option 為指定值時生效）
+      - option: vertical_layout
+        value: true
+        layout: vertical
+
+      # 規則2：候選詞長度規則（候選詞最大 Unicode 字數超過閾值時生效）
+      - candidate_max_text_length_gt: 20
+        layout: vertical
+
+      # 規則3：可見候選數規則（當前頁實際可見候選數量超過閾值時生效）
+      - candidate_count_gt: 6
+        layout: vertical
+```
+
+* **優先級原則**：規則列表按書寫順序自上而下匹配（First match wins）。
+* **與 Lua 腳本聯動**：Lua 模組只需調用 `env.engine.context:set_option("vertical_layout", true)` 即可即時將當前候選視窗轉為縱排展示，調用 `set_option("vertical_layout", false)` 恢復橫排。
+* 更多設計原則與詳細說明請參閱文檔：[DYNAMIC_LAYOUT.md](DYNAMIC_LAYOUT.md)。
 
 致謝
 ----
