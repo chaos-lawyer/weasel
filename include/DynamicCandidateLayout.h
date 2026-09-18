@@ -8,10 +8,7 @@
 
 namespace weasel {
 
-enum class CandidateLayout {
-  Horizontal,
-  Vertical
-};
+enum class CandidateLayout { Horizontal, Vertical };
 
 enum class LayoutRuleType {
   Invalid,
@@ -41,7 +38,8 @@ inline size_t CalculateUnicodeLength(const std::wstring& text) {
     wchar_t ch = text[i];
     if (ch >= 0xD800 && ch <= 0xDBFF) {
       // High surrogate, check if paired with low surrogate
-      if (i + 1 < text.size() && text[i + 1] >= 0xDC00 && text[i + 1] <= 0xDFFF) {
+      if (i + 1 < text.size() && text[i + 1] >= 0xDC00 &&
+          text[i + 1] <= 0xDFFF) {
         ++i;
       }
     }
@@ -50,7 +48,8 @@ inline size_t CalculateUnicodeLength(const std::wstring& text) {
   return count;
 }
 
-// Extension point: can be enhanced in the future for actual pixel width measurement.
+// Extension point: can be enhanced in the future for actual pixel width
+// measurement.
 inline size_t MeasureCandidateTextMetric(const std::wstring& text) {
   return CalculateUnicodeLength(text);
 }
@@ -67,7 +66,8 @@ inline size_t GetMaxCandidateUnicodeLength(const CandidateInfo& cinfo) {
 }
 
 // Resolves candidate layout based on context, rules, and option values.
-// Follows "first match wins" priority. Fallback to default_layout if no rule matches.
+// Follows "first match wins" priority. Fallback to default_layout if no rule
+// matches.
 inline CandidateLayout ResolveCandidateLayout(
     const CandidateInfo& cinfo,
     CandidateLayout default_fallback,
@@ -85,7 +85,10 @@ inline CandidateLayout ResolveCandidateLayout(
           if (actual_val == rule.option_value) {
             DLOG(INFO) << "DynamicLayout: matched option " << rule.option_name
                        << "=" << (actual_val ? "true" : "false")
-                       << ", resolved=" << (rule.target_layout == CandidateLayout::Vertical ? "vertical" : "horizontal");
+                       << ", resolved="
+                       << (rule.target_layout == CandidateLayout::Vertical
+                               ? "vertical"
+                               : "horizontal");
             return rule.target_layout;
           }
         }
@@ -97,7 +100,10 @@ inline CandidateLayout ResolveCandidateLayout(
           if (max_len > static_cast<size_t>(rule.threshold)) {
             DLOG(INFO) << "DynamicLayout: matched candidate_max_text_length_gt "
                        << rule.threshold << " (actual " << max_len
-                       << "), resolved=" << (rule.target_layout == CandidateLayout::Vertical ? "vertical" : "horizontal");
+                       << "), resolved="
+                       << (rule.target_layout == CandidateLayout::Vertical
+                               ? "vertical"
+                               : "horizontal");
             return rule.target_layout;
           }
         }
@@ -109,7 +115,10 @@ inline CandidateLayout ResolveCandidateLayout(
           if (count > static_cast<size_t>(rule.threshold)) {
             DLOG(INFO) << "DynamicLayout: matched candidate_count_gt "
                        << rule.threshold << " (actual " << count
-                       << "), resolved=" << (rule.target_layout == CandidateLayout::Vertical ? "vertical" : "horizontal");
+                       << "), resolved="
+                       << (rule.target_layout == CandidateLayout::Vertical
+                               ? "vertical"
+                               : "horizontal");
             return rule.target_layout;
           }
         }
@@ -123,7 +132,9 @@ inline CandidateLayout ResolveCandidateLayout(
   }
 
   DLOG(INFO) << "DynamicLayout: no rule matched, resolved to default="
-             << (config.default_layout == CandidateLayout::Vertical ? "vertical" : "horizontal");
+             << (config.default_layout == CandidateLayout::Vertical
+                     ? "vertical"
+                     : "horizontal");
   return config.default_layout;
 }
 

@@ -7,17 +7,19 @@
 #include <boost/detail/lightweight_test.hpp>
 #else
 static int g_errors = 0;
-#define BOOST_TEST(expr)                                                       \
-  do {                                                                         \
-    if (!(expr)) {                                                             \
+#define BOOST_TEST(expr)                                                      \
+  do {                                                                        \
+    if (!(expr)) {                                                            \
       std::cerr << "FAIL: " << #expr << " at " << __FILE__ << ":" << __LINE__ \
-                << std::endl;                                                  \
-      ++g_errors;                                                              \
-    }                                                                          \
+                << std::endl;                                                 \
+      ++g_errors;                                                             \
+    }                                                                         \
   } while (0)
 namespace boost {
-inline int report_errors() { return g_errors; }
+inline int report_errors() {
+  return g_errors;
 }
+}  // namespace boost
 #endif
 #include <DynamicCandidateLayout.h>
 
@@ -116,24 +118,25 @@ void test_dynamic_sequence() {
   CandidateInfo cinfo;
   bool is_vertical = false;
   auto getter = [&](const std::string& name) {
-    if (name == "vertical_layout") return is_vertical;
+    if (name == "vertical_layout")
+      return is_vertical;
     return false;
   };
 
   // Step 1: 普通输入 -> Horizontal
   is_vertical = false;
-  BOOST_TEST(ResolveCandidateLayout(cinfo, CandidateLayout::Horizontal, config, getter) ==
-             CandidateLayout::Horizontal);
+  BOOST_TEST(ResolveCandidateLayout(cinfo, CandidateLayout::Horizontal, config,
+                                    getter) == CandidateLayout::Horizontal);
 
   // Step 2: 进入特定模式 (vertical_layout = true) -> Vertical
   is_vertical = true;
-  BOOST_TEST(ResolveCandidateLayout(cinfo, CandidateLayout::Horizontal, config, getter) ==
-             CandidateLayout::Vertical);
+  BOOST_TEST(ResolveCandidateLayout(cinfo, CandidateLayout::Horizontal, config,
+                                    getter) == CandidateLayout::Vertical);
 
   // Step 3: 退出特定模式 (vertical_layout = false) -> 恢复 Horizontal
   is_vertical = false;
-  BOOST_TEST(ResolveCandidateLayout(cinfo, CandidateLayout::Horizontal, config, getter) ==
-             CandidateLayout::Horizontal);
+  BOOST_TEST(ResolveCandidateLayout(cinfo, CandidateLayout::Horizontal, config,
+                                    getter) == CandidateLayout::Horizontal);
 }
 
 // 5. 候选词文本长度规则测试
@@ -151,24 +154,26 @@ void test_candidate_length_rules() {
 
   auto no_option = [](const std::string&) { return false; };
 
-  // Unicode 长度计算单元测试（代理对测试：例如 𠮷 为 surrogate pair，长度应算 1 个字符）
-  std::wstring emoji = L"😊"; // High surrogate 0xD83D, Low surrogate 0xDE0A
+  // Unicode 长度计算单元测试（代理对测试：例如 𠮷 为 surrogate pair，长度应算 1
+  // 个字符）
+  std::wstring emoji = L"😊";  // High surrogate 0xD83D, Low surrogate 0xDE0A
   BOOST_TEST(CalculateUnicodeLength(emoji) == 1);
-  std::wstring mixed = L"你好😊世界"; // 2 + 1 + 2 = 5
+  std::wstring mixed = L"你好😊世界";  // 2 + 1 + 2 = 5
   BOOST_TEST(CalculateUnicodeLength(mixed) == 5);
 
   // 候选词最大长度 <= 10 -> Horizontal
   CandidateInfo cinfo1;
   cinfo1.candies.push_back(Text(L"短候选词"));
-  cinfo1.candies.push_back(Text(L"一二三四五六七八九十")); // 10 chars
-  BOOST_TEST(ResolveCandidateLayout(cinfo1, CandidateLayout::Horizontal, config, no_option) ==
-             CandidateLayout::Horizontal);
+  cinfo1.candies.push_back(Text(L"一二三四五六七八九十"));  // 10 chars
+  BOOST_TEST(ResolveCandidateLayout(cinfo1, CandidateLayout::Horizontal, config,
+                                    no_option) == CandidateLayout::Horizontal);
 
   // 候选词最大长度 > 10 (11 chars) -> Vertical
   CandidateInfo cinfo2;
-  cinfo2.candies.push_back(Text(L"这是一个非常非常长的候选词文本测试")); // > 10 chars
-  BOOST_TEST(ResolveCandidateLayout(cinfo2, CandidateLayout::Horizontal, config, no_option) ==
-             CandidateLayout::Vertical);
+  cinfo2.candies.push_back(
+      Text(L"这是一个非常非常长的候选词文本测试"));  // > 10 chars
+  BOOST_TEST(ResolveCandidateLayout(cinfo2, CandidateLayout::Horizontal, config,
+                                    no_option) == CandidateLayout::Vertical);
 }
 
 // 6. 候选词数量规则测试
@@ -191,16 +196,16 @@ void test_candidate_count_rules() {
   for (int i = 0; i < 5; ++i) {
     cinfo1.candies.push_back(Text(std::to_wstring(i)));
   }
-  BOOST_TEST(ResolveCandidateLayout(cinfo1, CandidateLayout::Horizontal, config, no_option) ==
-             CandidateLayout::Horizontal);
+  BOOST_TEST(ResolveCandidateLayout(cinfo1, CandidateLayout::Horizontal, config,
+                                    no_option) == CandidateLayout::Horizontal);
 
   // 候选数量 6 > 5 -> Vertical
   CandidateInfo cinfo2;
   for (int i = 0; i < 6; ++i) {
     cinfo2.candies.push_back(Text(std::to_wstring(i)));
   }
-  BOOST_TEST(ResolveCandidateLayout(cinfo2, CandidateLayout::Horizontal, config, no_option) ==
-             CandidateLayout::Vertical);
+  BOOST_TEST(ResolveCandidateLayout(cinfo2, CandidateLayout::Horizontal, config,
+                                    no_option) == CandidateLayout::Vertical);
 }
 
 // 7. 规则优先级测试 (First match wins)
@@ -225,17 +230,17 @@ void test_rule_priority() {
   config.rules.push_back(rule2);
 
   CandidateInfo cinfo;
-  cinfo.candies.push_back(Text(L"长文本长文本长文本")); // length > 5
+  cinfo.candies.push_back(Text(L"长文本长文本长文本"));  // length > 5
 
   // 当 emoji_mode = true 时，规则 1 优先命中，保持 Horizontal
   auto emoji_on = [](const std::string& opt) { return opt == "emoji_mode"; };
-  BOOST_TEST(ResolveCandidateLayout(cinfo, CandidateLayout::Vertical, config, emoji_on) ==
-             CandidateLayout::Horizontal);
+  BOOST_TEST(ResolveCandidateLayout(cinfo, CandidateLayout::Vertical, config,
+                                    emoji_on) == CandidateLayout::Horizontal);
 
   // 当 emoji_mode = false 时，规则 1 不命中，规则 2 命中，变为 Vertical
   auto emoji_off = [](const std::string&) { return false; };
-  BOOST_TEST(ResolveCandidateLayout(cinfo, CandidateLayout::Vertical, config, emoji_off) ==
-             CandidateLayout::Vertical);
+  BOOST_TEST(ResolveCandidateLayout(cinfo, CandidateLayout::Vertical, config,
+                                    emoji_off) == CandidateLayout::Vertical);
 }
 
 // 8. 错误配置与极端情况容错测试
@@ -273,6 +278,7 @@ int main() {
   test_rule_priority();
   test_invalid_config_resilience();
 
-  std::cout << "All DynamicCandidateLayout tests passed successfully!" << std::endl;
+  std::cout << "All DynamicCandidateLayout tests passed successfully!"
+            << std::endl;
   return boost::report_errors();
 }
