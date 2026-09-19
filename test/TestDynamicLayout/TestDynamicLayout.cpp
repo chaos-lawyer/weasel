@@ -22,6 +22,7 @@ inline int report_errors() {
 }  // namespace boost
 #endif
 #include <DynamicCandidateLayout.h>
+#include <DynamicCandidateSelectKeys.h>
 
 using namespace weasel;
 
@@ -326,6 +327,111 @@ void test_invalid_config_resilience() {
   BOOST_TEST(res == CandidateLayout::Horizontal);
 }
 
+// 11. 动态选择键与标签测试
+void test_dynamic_candidate_select_keys_and_labels() {
+  std::vector<std::wstring> empty_labels;
+  std::vector<std::wstring> empty_keys;
+
+  // 11.1 原生回退测试：无任何设置时，默认返回 1, 2, 3... 0
+  BOOST_TEST(FormatCandidateLabel(0, empty_labels, empty_keys, nullptr,
+                                  nullptr) == L"1");
+  BOOST_TEST(FormatCandidateLabel(8, empty_labels, empty_keys, nullptr,
+                                  nullptr) == L"9");
+  BOOST_TEST(FormatCandidateLabel(9, empty_labels, empty_keys, nullptr,
+                                  nullptr) == L"0");
+
+  // 11.2 Schema 优先级测试：ctx.select_labels 和 ctx.menu.select_keys
+  const char* schema_labels[] = {"一", "二", "三"};
+  BOOST_TEST(FormatCandidateLabel(0, empty_labels, empty_keys, schema_labels,
+                                  nullptr) == L"一");
+  BOOST_TEST(FormatCandidateLabel(1, empty_labels, empty_keys, schema_labels,
+                                  nullptr) == L"二");
+
+  const char* schema_keys = "asdfg";
+  BOOST_TEST(FormatCandidateLabel(0, empty_labels, empty_keys, nullptr,
+                                  schema_keys) == L"a");
+  BOOST_TEST(FormatCandidateLabel(2, empty_labels, empty_keys, nullptr,
+                                  schema_keys) == L"d");
+
+  // 11.3 运行时 candidate_select_keys: 优先级高于 schema
+  auto runtime_keys = ParseSelectKeys("abcde");
+  BOOST_TEST(runtime_keys.size() == 5);
+  BOOST_TEST(FormatCandidateLabel(0, empty_labels, runtime_keys, schema_labels,
+                                  schema_keys) == L"a");
+  BOOST_TEST(FormatCandidateLabel(4, empty_labels, runtime_keys, schema_labels,
+                                  schema_keys) == L"e");
+  // 超出 key 范围返回空串
+  BOOST_TEST(FormatCandidateLabel(5, empty_labels, runtime_keys, schema_labels,
+                                  schema_keys) == L"");
+
+  // 11.4 运行时 candidate_select_labels: 优先级最高
+  auto runtime_labels = ParseSelectLabels("① ② ③ ④ ⑤");
+  BOOST_TEST(runtime_labels.size() == 5);
+  BOOST_TEST(FormatCandidateLabel(0, runtime_labels, runtime_keys,
+                                  schema_labels, schema_keys) == L"①");
+  BOOST_TEST(FormatCandidateLabel(1, runtime_labels, runtime_keys,
+                                  schema_labels, schema_keys) == L"②");
+
+  // 无空格紧凑格式 candidate_select_labels
+  auto runtime_labels_compact = ParseSelectLabels("甲乙丙");
+  BOOST_TEST(runtime_labels_compact.size() == 3);
+  BOOST_TEST(runtime_labels_compact[0] == L"甲");
+  BOOST_TEST(runtime_labels_compact[1] == L"乙");
+  BOOST_TEST(runtime_labels_compact[2] == L"丙");
+
+  // 11.5 按键解析与选词命中测试
+  size_t selected_idx = 999;
+  // 'a' 选中候选 0
+  auto act_a =
+      ResolveDynamicCandidateSelection('a', 0, runtime_keys, 5, selected_idx);
+  BOOST_TEST(act_a == DynamicCandidateSelectAction::SelectCandidate);
+  BOOST_TEST(selected_idx == 0);
+
+  // 'c' 选中候选 2
+  auto act_c =
+      ResolveDynamicCandidateSelection('c', 0, runtime_keys, 5, selected_idx);
+  BOOST_TEST(act_c == DynamicCandidateSelectAction::SelectCandidate);
+  BOOST_TEST(selected_idx == 2);
+
+  // 大小写敏感测试：'A' 不匹配 "abcde"
+  auto act_cap_a =
+      ResolveDynamicCandidateSelection('A', 0, runtime_keys, 5, selected_idx);
+  BOOST_TEST(act_cap_a == DynamicCandidateSelectAction::PassThrough);
+
+  // 非字母符号按键测试："asdfghjkl;"
+  auto symbol_keys = ParseSelectKeys("asdfghjkl;");
+  BOOST_TEST(symbol_keys.size() == 10);
+  auto act_semi =
+      ResolveDynamicCandidateSelection(';', 0, symbol_keys, 10, selected_idx);
+  BOOST_TEST(act_semi == DynamicCandidateSelectAction::SelectCandidate);
+  BOOST_TEST(selected_idx == 9);
+
+  // 11.6 越界安全防护测试：当前页仅 2 个候选，按下 'c' (index 2)
+  // 应吞掉而非崩溃或越界
+  auto act_oob =
+      ResolveDynamicCandidateSelection('c', 0, runtime_keys, 2, selected_idx);
+  BOOST_TEST(act_oob == DynamicCandidateSelectAction::Swallow);
+
+  // 11.7 修饰键放行测试：Ctrl+a, Alt+a 必须放行，不作为选词
+  auto act_ctrl = ResolveDynamicCandidateSelection(
+      'a', select_keys_ibus::CONTROL_MASK, runtime_keys, 5, selected_idx);
+  BOOST_TEST(act_ctrl == DynamicCandidateSelectAction::PassThrough);
+
+  auto act_alt = ResolveDynamicCandidateSelection(
+      'a', select_keys_ibus::ALT_MASK, runtime_keys, 5, selected_idx);
+  BOOST_TEST(act_alt == DynamicCandidateSelectAction::PassThrough);
+
+  // 11.8 KeyRelease 吞键测试：选词键的按键弹起予以消费，避免送入宿主应用
+  auto act_release = ResolveDynamicCandidateSelection(
+      'a', select_keys_ibus::RELEASE_MASK, runtime_keys, 5, selected_idx);
+  BOOST_TEST(act_release == DynamicCandidateSelectAction::Swallow);
+
+  // 11.9 未配置动态选择键时的放行测试
+  auto act_empty =
+      ResolveDynamicCandidateSelection('a', 0, empty_keys, 5, selected_idx);
+  BOOST_TEST(act_empty == DynamicCandidateSelectAction::PassThrough);
+}
+
 int main() {
   test_compatibility();
   test_auto_default();
@@ -337,8 +443,10 @@ int main() {
   test_candidate_count_rules();
   test_rule_priority();
   test_invalid_config_resilience();
+  test_dynamic_candidate_select_keys_and_labels();
 
-  std::cout << "All DynamicCandidateLayout tests passed successfully!"
+  std::cout << "All DynamicCandidateLayout and DynamicCandidateSelectKeys "
+               "tests passed successfully!"
             << std::endl;
   return boost::report_errors();
 }

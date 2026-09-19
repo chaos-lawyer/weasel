@@ -365,8 +365,46 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
   RimeSessionId session_id = to_session_id(ipc_id);
   SessionStatus& session_status = get_session_status(ipc_id);
   _RemapCandidateNavigationKey(session_status, session_id, keyEvent);
-  Bool handled = rime_api->process_key(session_id, keyEvent.keycode,
-                                       expand_ibus_modifier(keyEvent.mask));
+
+  char runtime_select_keys_buf[256] = {0};
+  const bool has_runtime_select_keys =
+      rime_api->get_property(session_id, "candidate_select_keys",
+                             runtime_select_keys_buf,
+                             sizeof(runtime_select_keys_buf)) &&
+      runtime_select_keys_buf[0] != '\0';
+
+  Bool handled = False;
+  bool custom_key_processed = false;
+
+  if (has_runtime_select_keys) {
+    RIME_STRUCT(RimeContext, ctx);
+    if (rime_api->get_context(session_id, &ctx)) {
+      const size_t num_candidates = ctx.menu.num_candidates;
+      rime_api->free_context(&ctx);
+
+      if (num_candidates > 0) {
+        const auto runtime_keys =
+            weasel::ParseSelectKeys(runtime_select_keys_buf);
+        size_t selected_index = 0;
+        const auto action = weasel::ResolveDynamicCandidateSelection(
+            keyEvent.keycode, keyEvent.mask, runtime_keys, num_candidates,
+            selected_index);
+        if (action == weasel::DynamicCandidateSelectAction::SelectCandidate) {
+          handled = rime_api->select_candidate_on_current_page(session_id,
+                                                               selected_index);
+          custom_key_processed = true;
+        } else if (action == weasel::DynamicCandidateSelectAction::Swallow) {
+          handled = True;
+          custom_key_processed = true;
+        }
+      }
+    }
+  }
+
+  if (!custom_key_processed) {
+    handled = rime_api->process_key(session_id, keyEvent.keycode,
+                                    expand_ibus_modifier(keyEvent.mask));
+  }
   // vim_mode when keydown only
   if (!handled && !(keyEvent.mask & ibus::Modifier::RELEASE_MASK)) {
     bool isVimBackInCommandMode =
@@ -544,24 +582,45 @@ void RimeWithWeaselHandler::_ReadClientInfo(WeaselSessionId ipc_id,
 }
 
 void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
-                                              RimeContext& ctx) {
+                                              RimeContext& ctx,
+                                              RimeSessionId session_id) {
   cinfo.candies.resize(ctx.menu.num_candidates);
   cinfo.comments.resize(ctx.menu.num_candidates);
   cinfo.labels.resize(ctx.menu.num_candidates);
+
+  char runtime_labels_buf[256] = {0};
+  std::vector<std::wstring> runtime_labels;
+  if (session_id &&
+      rime_api->get_property(session_id, "candidate_select_labels",
+                             runtime_labels_buf, sizeof(runtime_labels_buf)) &&
+      runtime_labels_buf[0] != '\0') {
+    runtime_labels = weasel::ParseSelectLabels(runtime_labels_buf);
+  }
+
+  char runtime_keys_buf[256] = {0};
+  std::vector<std::wstring> runtime_keys;
+  if (session_id &&
+      rime_api->get_property(session_id, "candidate_select_keys",
+                             runtime_keys_buf, sizeof(runtime_keys_buf)) &&
+      runtime_keys_buf[0] != '\0') {
+    runtime_keys = weasel::ParseSelectKeys(runtime_keys_buf);
+  }
+
+  const char* const* schema_select_labels =
+      (RIME_STRUCT_HAS_MEMBER(ctx, ctx.select_labels) && ctx.select_labels)
+          ? ctx.select_labels
+          : nullptr;
+  const char* schema_select_keys = ctx.menu.select_keys;
+
   for (int i = 0; i < ctx.menu.num_candidates; ++i) {
     cinfo.candies[i].str = escape_string(u8tow(ctx.menu.candidates[i].text));
     if (ctx.menu.candidates[i].comment) {
       cinfo.comments[i].str =
           escape_string(u8tow(ctx.menu.candidates[i].comment));
     }
-    if (RIME_STRUCT_HAS_MEMBER(ctx, ctx.select_labels) && ctx.select_labels) {
-      cinfo.labels[i].str = escape_string(u8tow(ctx.select_labels[i]));
-    } else if (ctx.menu.select_keys) {
-      cinfo.labels[i].str =
-          escape_string(std::wstring(1, ctx.menu.select_keys[i]));
-    } else {
-      cinfo.labels[i].str = std::to_wstring((i + 1) % 10);
-    }
+    cinfo.labels[i].str = escape_string(weasel::FormatCandidateLabel(
+        static_cast<size_t>(i), runtime_labels, runtime_keys,
+        schema_select_labels, schema_select_keys));
   }
   cinfo.highlighted = ctx.menu.highlighted_candidate_index;
   cinfo.currentPage = ctx.menu.page_no;
@@ -939,7 +998,7 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
     bool has_candidates = ctx.menu.num_candidates > 0;
     CandidateInfo cinfo;
     if (has_candidates) {
-      _GetCandidateInfo(cinfo, ctx);
+      _GetCandidateInfo(cinfo, ctx, session_id);
     }
     _ResolveLayoutForSession(session_status, cinfo);
     if (is_composing) {
@@ -1877,7 +1936,7 @@ void RimeWithWeaselHandler::_GetContext(Context& weasel_context,
     }
     if (ctx.menu.num_candidates) {
       CandidateInfo& cinfo(weasel_context.cinfo);
-      _GetCandidateInfo(cinfo, ctx);
+      _GetCandidateInfo(cinfo, ctx, session_id);
     }
     rime_api->free_context(&ctx);
   }
