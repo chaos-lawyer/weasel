@@ -1211,7 +1211,7 @@ void RimeWithWeaselHandler::_LoadDynamicLayoutConfig(
   dlc.rules.clear();
   dlc.enabled = (style.layout_type == UIStyle::LAYOUT_AUTO);
   weasel::CandidateLayout default_layout = weasel::CandidateLayout::Horizontal;
-  const int BUF_SIZE = 255;
+  constexpr int BUF_SIZE = 255;
   char buffer[BUF_SIZE + 1] = {0};
   if (rime_api->config_get_string(config, "dynamic_layout/default", buffer,
                                   BUF_SIZE)) {
@@ -1232,12 +1232,13 @@ void RimeWithWeaselHandler::_LoadDynamicLayoutConfig(
 
   ForEachRimeList(config, "dynamic_layout/rules", [&](const char* item_path) {
     weasel::DynamicLayoutRule rule;
-    char val_buf[BUF_SIZE + 1] = {0};
+    constexpr int RULE_BUF_SIZE = 255;
+    char val_buf[RULE_BUF_SIZE + 1] = {0};
 
     // Layout target (required for a valid rule)
     std::string layout_path = std::string(item_path) + "/layout";
     if (!rime_api->config_get_string(config, layout_path.c_str(), val_buf,
-                                     BUF_SIZE)) {
+                                     RULE_BUF_SIZE)) {
       LOG(WARNING) << "DynamicLayout: rule at " << item_path
                    << " missing 'layout' field, ignored";
       return;
@@ -1255,7 +1256,7 @@ void RimeWithWeaselHandler::_LoadDynamicLayoutConfig(
     // 1. Check option rule
     std::string option_path = std::string(item_path) + "/option";
     if (rime_api->config_get_string(config, option_path.c_str(), val_buf,
-                                    BUF_SIZE)) {
+                                    RULE_BUF_SIZE)) {
       rule.type = weasel::LayoutRuleType::Option;
       rule.option_name = val_buf;
       Bool bool_val = True;
