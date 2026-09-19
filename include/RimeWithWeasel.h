@@ -93,7 +93,7 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   void _UpdateShowNotifications(RimeConfig* config, bool initialize = false);
   void _LoadDynamicLayoutConfig(RimeConfig* config,
                                 weasel::DynamicLayoutConfig& dlc,
-                                const weasel::UIStyle& style);
+                                weasel::UIStyle::LayoutType configured_type);
   void _ResolveLayoutForSession(SessionStatus& session_status,
                                 const weasel::CandidateInfo& cinfo);
 

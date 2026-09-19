@@ -199,6 +199,10 @@ STDMETHODIMP CCandidateList::FinalizeExactCompositionString() {
 }
 
 void CCandidateList::UpdateUI(const Context& ctx, const Status& status) {
+  // IPC deserializes style updates into _style.  Keep the live UI style in
+  // sync on every response so an already-open candidate window can switch
+  // layout without being destroyed and recreated.
+  _ui->style() = _style;
   if (_ui->style().inline_preedit) {
     _ui->style().client_caps |= weasel::INLINE_PREEDIT_CAPABLE;
   } else {
@@ -218,6 +222,7 @@ void CCandidateList::UpdateUI(const Context& ctx, const Status& status) {
 }
 
 void CCandidateList::UpdateStyle(const UIStyle& sty) {
+  _style = sty;
   _ui->style() = sty;
 }
 

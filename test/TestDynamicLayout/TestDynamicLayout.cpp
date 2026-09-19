@@ -139,7 +139,20 @@ void test_dynamic_sequence() {
                                     getter) == CandidateLayout::Horizontal);
 }
 
-// 5. 候选词文本长度规则测试
+// 5. Schema 布局继承测试
+// schema 未配置布局时必须保留全局 AUTO，而不是继承当前解析出的横排默认值。
+void test_configured_layout_inheritance() {
+  BOOST_TEST(ResolveConfiguredLayoutType(UIStyle::LAYOUT_AUTO,
+                                         UIStyle::LAYOUT_HORIZONTAL,
+                                         false) == UIStyle::LAYOUT_AUTO);
+
+  // schema 显式配置布局时，应以 schema 为准。
+  BOOST_TEST(ResolveConfiguredLayoutType(UIStyle::LAYOUT_AUTO,
+                                         UIStyle::LAYOUT_VERTICAL,
+                                         true) == UIStyle::LAYOUT_VERTICAL);
+}
+
+// 6. 候选词文本长度规则测试
 // 包含 Unicode 字符长度、中文及 Emoji 代理对
 void test_candidate_length_rules() {
   DynamicLayoutConfig config;
@@ -176,7 +189,7 @@ void test_candidate_length_rules() {
                                     no_option) == CandidateLayout::Vertical);
 }
 
-// 6. 候选词数量规则测试
+// 7. 候选词数量规则测试
 // 基于当前页实际可见候选数量
 void test_candidate_count_rules() {
   DynamicLayoutConfig config;
@@ -208,7 +221,7 @@ void test_candidate_count_rules() {
                                     no_option) == CandidateLayout::Vertical);
 }
 
-// 7. 规则优先级测试 (First match wins)
+// 8. 规则优先级测试 (First match wins)
 void test_rule_priority() {
   DynamicLayoutConfig config;
   config.enabled = true;
@@ -243,7 +256,7 @@ void test_rule_priority() {
                                     emoji_off) == CandidateLayout::Vertical);
 }
 
-// 8. 错误配置与极端情况容错测试
+// 9. 错误配置与极端情况容错测试
 void test_invalid_config_resilience() {
   DynamicLayoutConfig config;
   config.enabled = true;
@@ -273,6 +286,7 @@ int main() {
   test_auto_default();
   test_option_rules();
   test_dynamic_sequence();
+  test_configured_layout_inheritance();
   test_candidate_length_rules();
   test_candidate_count_rules();
   test_rule_priority();

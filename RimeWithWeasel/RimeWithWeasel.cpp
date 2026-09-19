@@ -139,7 +139,8 @@ void RimeWithWeaselHandler::Initialize() {
       Bool is_fs = False;
       rime_api->config_get_bool(&config, "style/fullscreen", &is_fs);
       m_base_fullscreen = !!is_fs;
-      _LoadDynamicLayoutConfig(&config, m_base_dynamic_layout, m_base_style);
+      _LoadDynamicLayoutConfig(&config, m_base_dynamic_layout,
+                               m_base_configured_layout_type);
       if (m_base_configured_layout_type == UIStyle::LAYOUT_AUTO) {
         m_base_style.layout_type =
             (m_base_dynamic_layout.default_layout ==
@@ -585,18 +586,33 @@ void RimeWithWeaselHandler::_LoadSchemaSpecificSettings(
   RimeConfig config;
   if (!rime_api->schema_open(schema_id.c_str(), &config))
     return;
+  const auto schema_overrides_layout = [this, &config]() {
+    constexpr int BUF_SIZE = 255;
+    char buffer[BUF_SIZE + 1] = {0};
+    Bool bool_value = False;
+    return rime_api->config_get_string(&config, "style/layout/type", buffer,
+                                       BUF_SIZE) ||
+           rime_api->config_get_bool(&config, "style/horizontal",
+                                     &bool_value) ||
+           rime_api->config_get_bool(&config, "style/vertical_text",
+                                     &bool_value) ||
+           rime_api->config_get_string(&config, "style/text_orientation",
+                                       buffer, BUF_SIZE);
+  }();
   _UpdateShowNotifications(&config);
   m_ui->style() = m_base_style;
   _UpdateUIStyle(&config, m_ui, false);
   SessionStatus& session_status = get_session_status(ipc_id);
   session_status.style = m_ui->style();
   UIStyle& style = session_status.style;
-  session_status.configured_layout_type = style.layout_type;
+  session_status.configured_layout_type = weasel::ResolveConfiguredLayoutType(
+      m_base_configured_layout_type, style.layout_type,
+      schema_overrides_layout);
   Bool is_fs = m_base_fullscreen ? True : False;
   rime_api->config_get_bool(&config, "style/fullscreen", &is_fs);
   session_status.fullscreen = !!is_fs;
   _LoadDynamicLayoutConfig(&config, session_status.dynamic_layout_config,
-                           style);
+                           session_status.configured_layout_type);
   if (session_status.configured_layout_type == UIStyle::LAYOUT_AUTO &&
       session_status.dynamic_layout_config.rules.empty() &&
       !m_base_dynamic_layout.rules.empty()) {
@@ -751,8 +767,13 @@ bool RimeWithWeaselHandler::_ShowMessage(Context& ctx, Status& status) {
       show_icon = true;
     } else if (m_message_value == "ascii_mode") {
       show_icon = true;
-    } else
+    } else {
       tips = u8tow(m_message_label);
+      // Internal options (for example a dynamic-layout trigger) have no state
+      // label and should not create a second, timed candidate window.
+      if (tips.empty())
+        return false;
+    }
 
     if (m_message_value == "full_shape" || m_message_value == "!full_shape")
       status.type = FULL_SHAPE;
@@ -1207,9 +1228,9 @@ void RimeWithWeaselHandler::_UpdateShowNotifications(RimeConfig* config,
 void RimeWithWeaselHandler::_LoadDynamicLayoutConfig(
     RimeConfig* config,
     weasel::DynamicLayoutConfig& dlc,
-    const weasel::UIStyle& style) {
+    UIStyle::LayoutType configured_type) {
   dlc.rules.clear();
-  dlc.enabled = (style.layout_type == UIStyle::LAYOUT_AUTO);
+  dlc.enabled = (configured_type == UIStyle::LAYOUT_AUTO);
   weasel::CandidateLayout default_layout = weasel::CandidateLayout::Horizontal;
   constexpr int BUF_SIZE = 255;
   char buffer[BUF_SIZE + 1] = {0};

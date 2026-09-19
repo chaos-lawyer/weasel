@@ -31,6 +31,16 @@ struct DynamicLayoutConfig {
   std::vector<DynamicLayoutRule> rules;
 };
 
+// A schema without its own layout selector inherits the user's configured
+// layout mode (including AUTO), rather than the concrete layout currently
+// used to render the default state.
+inline UIStyle::LayoutType ResolveConfiguredLayoutType(
+    UIStyle::LayoutType inherited_type,
+    UIStyle::LayoutType parsed_schema_type,
+    bool schema_overrides_layout) {
+  return schema_overrides_layout ? parsed_schema_type : inherited_type;
+}
+
 // Calculate Unicode code point count (surrogate pairs in UTF-16 counted as 1).
 inline size_t CalculateUnicodeLength(const std::wstring& text) {
   size_t count = 0;
