@@ -366,6 +366,17 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
   SessionStatus& session_status = get_session_status(ipc_id);
   _RemapCandidateNavigationKey(session_status, session_id, keyEvent);
 
+  // Quicker-style remappers emit the navigation key immediately before a
+  // leaked chord letter.  Track that event sequence instead of relying on the
+  // CapsLock state: a low-level hook may consume CapsLock before Windows makes
+  // its asynchronous state visible to this process.
+  const uint64_t event_tick = ::GetTickCount64();
+  const bool is_navigation_key =
+      keyEvent.keycode == ibus::Up || keyEvent.keycode == ibus::Down;
+  if (is_navigation_key && !(keyEvent.mask & ibus::RELEASE_MASK)) {
+    session_status.last_candidate_navigation_tick = event_tick;
+  }
+
   char runtime_select_keys_buf[256] = {0};
   const bool has_runtime_select_keys =
       rime_api->get_property(session_id, "candidate_select_keys",
@@ -386,9 +397,18 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
         const auto runtime_keys =
             weasel::ParseSelectKeys(runtime_select_keys_buf);
         size_t selected_index = 0;
+        const uint64_t navigation_tick =
+            session_status.last_candidate_navigation_tick;
+        const bool follows_remapped_navigation =
+            weasel::FollowsRemappedCandidateNavigation(
+                event_tick, navigation_tick, is_navigation_key);
         const auto action = weasel::ResolveDynamicCandidateSelection(
             keyEvent.keycode, keyEvent.mask, runtime_keys, num_candidates,
-            selected_index);
+            selected_index, follows_remapped_navigation);
+        if (follows_remapped_navigation &&
+            action != weasel::DynamicCandidateSelectAction::PassThrough) {
+          session_status.last_candidate_navigation_tick = 0;
+        }
         if (action == weasel::DynamicCandidateSelectAction::SelectCandidate) {
           handled = rime_api->select_candidate_on_current_page(session_id,
                                                                selected_index);

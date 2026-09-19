@@ -29,6 +29,7 @@ struct SessionStatus {
       : style(weasel::UIStyle()),
         configured_layout_type(weasel::UIStyle::LAYOUT_VERTICAL),
         fullscreen(false),
+        last_candidate_navigation_tick(0),
         __synced(false),
         session_id(0) {
     RIME_STRUCT(RimeStatus, status);
@@ -37,6 +38,7 @@ struct SessionStatus {
   weasel::UIStyle::LayoutType configured_layout_type;
   bool fullscreen;
   weasel::DynamicLayoutConfig dynamic_layout_config;
+  uint64_t last_candidate_navigation_tick;
   RimeStatus status;
   bool __synced;
   RimeSessionId session_id;

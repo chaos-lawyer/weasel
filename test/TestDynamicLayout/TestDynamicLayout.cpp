@@ -426,7 +426,33 @@ void test_dynamic_candidate_select_keys_and_labels() {
       'a', select_keys_ibus::RELEASE_MASK, runtime_keys, 5, selected_idx);
   BOOST_TEST(act_release == DynamicCandidateSelectAction::Swallow);
 
-  // 11.9 未配置动态选择键时的放行测试
+  // 11.9 外部映射导航后，泄漏的动态选词键应吞掉但不选词
+  selected_idx = 999;
+  auto act_caps_prefix = ResolveDynamicCandidateSelection(
+      'd', 0, runtime_keys, 5, selected_idx, true);
+  BOOST_TEST(act_caps_prefix == DynamicCandidateSelectAction::Swallow);
+  BOOST_TEST(selected_idx == 999);
+
+  // 映射组合可能让泄漏按键呈现为大写，也必须吞掉
+  auto act_caps_prefix_upper = ResolveDynamicCandidateSelection(
+      'D', 0, runtime_keys, 5, selected_idx, true);
+  BOOST_TEST(act_caps_prefix_upper == DynamicCandidateSelectAction::Swallow);
+  BOOST_TEST(selected_idx == 999);
+
+  // 非动态选词键仍应放行，保证 Quicker 注入的 Up/Down 正常处理
+  constexpr uint32_t kUpKeycode = 0xFF52;
+  auto act_caps_non_selection = ResolveDynamicCandidateSelection(
+      kUpKeycode, 0, runtime_keys, 5, selected_idx, true);
+  BOOST_TEST(act_caps_non_selection ==
+             DynamicCandidateSelectAction::PassThrough);
+
+  // 导航保护窗口只接受紧随其后的非导航事件
+  BOOST_TEST(FollowsRemappedCandidateNavigation(1080, 1000, false));
+  BOOST_TEST(!FollowsRemappedCandidateNavigation(1081, 1000, false));
+  BOOST_TEST(!FollowsRemappedCandidateNavigation(1010, 1000, true));
+  BOOST_TEST(!FollowsRemappedCandidateNavigation(1010, 0, false));
+
+  // 11.10 未配置动态选择键时的放行测试
   auto act_empty =
       ResolveDynamicCandidateSelection('a', 0, empty_keys, 5, selected_idx);
   BOOST_TEST(act_empty == DynamicCandidateSelectAction::PassThrough);
