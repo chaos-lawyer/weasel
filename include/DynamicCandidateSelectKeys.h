@@ -8,14 +8,16 @@
 namespace weasel {
 
 namespace select_keys_ibus {
+// Weasel KeyEvent uses a compressed 16-bit modifier mask. These values must
+// match KeyEvent.h; only calls into librime receive expand_ibus_modifier(mask).
 constexpr uint32_t SHIFT_MASK = 1 << 0;
 constexpr uint32_t LOCK_MASK = 1 << 1;
 constexpr uint32_t CONTROL_MASK = 1 << 2;
 constexpr uint32_t ALT_MASK = 1 << 3;
-constexpr uint32_t SUPER_MASK = 1 << 26;
-constexpr uint32_t HYPER_MASK = 1 << 27;
-constexpr uint32_t META_MASK = 1 << 28;
-constexpr uint32_t RELEASE_MASK = 1 << 30;
+constexpr uint32_t SUPER_MASK = 1 << 10;
+constexpr uint32_t HYPER_MASK = 1 << 11;
+constexpr uint32_t META_MASK = 1 << 12;
+constexpr uint32_t RELEASE_MASK = 1 << 14;
 }  // namespace select_keys_ibus
 
 enum class DynamicCandidateSelectAction {
@@ -23,16 +25,6 @@ enum class DynamicCandidateSelectAction {
   SelectCandidate,
   Swallow
 };
-
-constexpr uint64_t kRemappedNavigationGuardMs = 80;
-
-inline bool FollowsRemappedCandidateNavigation(uint64_t event_tick,
-                                               uint64_t navigation_tick,
-                                               bool is_navigation_key) {
-  return !is_navigation_key && navigation_tick != 0 &&
-         event_tick >= navigation_tick &&
-         event_tick - navigation_tick <= kRemappedNavigationGuardMs;
-}
 
 // Platform-independent UTF-8 to UTF-16 wstring decoder
 inline std::wstring DynamicUtf8ToWstring(const std::string& str) {
@@ -190,8 +182,7 @@ inline DynamicCandidateSelectAction ResolveDynamicCandidateSelection(
     uint32_t mask,
     const std::vector<std::wstring>& runtime_keys,
     size_t num_candidates,
-    size_t& selected_index,
-    bool suppress_matching_key = false) {
+    size_t& selected_index) {
   if (runtime_keys.empty() || num_candidates == 0) {
     return DynamicCandidateSelectAction::PassThrough;
   }
@@ -215,30 +206,8 @@ inline DynamicCandidateSelectAction ResolveDynamicCandidateSelection(
     }
   }
 
-  // A remapped chord may cause the leaked letter to be reported in uppercase
-  // even though the configured runtime selection key is lowercase.  Selection
-  // itself remains case-sensitive; only the suppression path folds case.
-  if (match_index < 0 && suppress_matching_key) {
-    const auto folded_key = std::towlower(static_cast<wchar_t>(keycode));
-    for (size_t idx = 0; idx < runtime_keys.size(); ++idx) {
-      if (runtime_keys[idx].size() == 1 &&
-          std::towlower(runtime_keys[idx][0]) == folded_key) {
-        match_index = static_cast<int>(idx);
-        break;
-      }
-    }
-  }
-
   if (match_index < 0) {
     return DynamicCandidateSelectAction::PassThrough;
-  }
-
-  // A remapping tool may inject a navigation key, then let the chord's letter
-  // reach TSF as well.  When that letter is also a runtime selection key,
-  // consume it without selecting a candidate.  The caller detects the event
-  // sequence because remapper-specific state is unavailable in this helper.
-  if (suppress_matching_key) {
-    return DynamicCandidateSelectAction::Swallow;
   }
 
   // If this is a key release of a selection key, swallow it so target app

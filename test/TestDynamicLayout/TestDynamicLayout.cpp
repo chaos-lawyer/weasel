@@ -426,31 +426,46 @@ void test_dynamic_candidate_select_keys_and_labels() {
       'a', select_keys_ibus::RELEASE_MASK, runtime_keys, 5, selected_idx);
   BOOST_TEST(act_release == DynamicCandidateSelectAction::Swallow);
 
-  // 11.9 外部映射导航后，泄漏的动态选词键应吞掉但不选词
-  selected_idx = 999;
-  auto act_caps_prefix = ResolveDynamicCandidateSelection(
-      'd', 0, runtime_keys, 5, selected_idx, true);
-  BOOST_TEST(act_caps_prefix == DynamicCandidateSelectAction::Swallow);
-  BOOST_TEST(selected_idx == 999);
+  // Regression: Weasel IPC stores release in bit 14, not librime's bit 30.
+  // Use the actual wire value rather than the resolver's own constant.
+  for (const auto letter : {'d', 'e'}) {
+    selected_idx = 999;
+    auto wire_release = ResolveDynamicCandidateSelection(
+        letter, 0x4000, runtime_keys, 5, selected_idx);
+    BOOST_TEST(wire_release == DynamicCandidateSelectAction::Swallow);
+    BOOST_TEST(selected_idx == 999);
+  }
 
-  // 映射组合可能让泄漏按键呈现为大写，也必须吞掉
-  auto act_caps_prefix_upper = ResolveDynamicCandidateSelection(
-      'D', 0, runtime_keys, 5, selected_idx, true);
-  BOOST_TEST(act_caps_prefix_upper == DynamicCandidateSelectAction::Swallow);
-  BOOST_TEST(selected_idx == 999);
+  // Navigation followed by an orphan key-up must never select a candidate.
+  // A subsequent genuine key-down must still select immediately (no timer).
+  for (const auto navigation : {0xFF52u, 0xFF54u}) {
+    for (const auto letter : {'d', 'e'}) {
+      selected_idx = 999;
+      BOOST_TEST(ResolveDynamicCandidateSelection(navigation, 0, runtime_keys,
+                                                  5, selected_idx) ==
+                 DynamicCandidateSelectAction::PassThrough);
+      BOOST_TEST(ResolveDynamicCandidateSelection(
+                     navigation, 0x4000, runtime_keys, 5, selected_idx) ==
+                 DynamicCandidateSelectAction::PassThrough);
+      BOOST_TEST(ResolveDynamicCandidateSelection(letter, 0x4000, runtime_keys,
+                                                  5, selected_idx) ==
+                 DynamicCandidateSelectAction::Swallow);
+      BOOST_TEST(selected_idx == 999);
+      BOOST_TEST(ResolveDynamicCandidateSelection(letter, 0, runtime_keys, 5,
+                                                  selected_idx) ==
+                 DynamicCandidateSelectAction::SelectCandidate);
+      BOOST_TEST(selected_idx == static_cast<size_t>(letter - 'a'));
+    }
+  }
 
-  // 非动态选词键仍应放行，保证 Quicker 注入的 Up/Down 正常处理
-  constexpr uint32_t kUpKeycode = 0xFF52;
-  auto act_caps_non_selection = ResolveDynamicCandidateSelection(
-      kUpKeycode, 0, runtime_keys, 5, selected_idx, true);
-  BOOST_TEST(act_caps_non_selection ==
-             DynamicCandidateSelectAction::PassThrough);
-
-  // 导航保护窗口只接受紧随其后的非导航事件
-  BOOST_TEST(FollowsRemappedCandidateNavigation(1080, 1000, false));
-  BOOST_TEST(!FollowsRemappedCandidateNavigation(1081, 1000, false));
-  BOOST_TEST(!FollowsRemappedCandidateNavigation(1010, 1000, true));
-  BOOST_TEST(!FollowsRemappedCandidateNavigation(1010, 0, false));
+  // The other high modifiers use the compressed IPC representation too.
+  for (const auto modifier : {0x0400u, 0x0800u, 0x1000u}) {
+    selected_idx = 999;
+    BOOST_TEST(ResolveDynamicCandidateSelection('d', modifier, runtime_keys, 5,
+                                                selected_idx) ==
+               DynamicCandidateSelectAction::PassThrough);
+    BOOST_TEST(selected_idx == 999);
+  }
 
   // 11.10 未配置动态选择键时的放行测试
   auto act_empty =
@@ -471,8 +486,11 @@ int main() {
   test_invalid_config_resilience();
   test_dynamic_candidate_select_keys_and_labels();
 
-  std::cout << "All DynamicCandidateLayout and DynamicCandidateSelectKeys "
-               "tests passed successfully!"
-            << std::endl;
-  return boost::report_errors();
+  const int errors = boost::report_errors();
+  if (errors == 0) {
+    std::cout << "All DynamicCandidateLayout and DynamicCandidateSelectKeys "
+                 "tests passed successfully!"
+              << std::endl;
+  }
+  return errors;
 }
