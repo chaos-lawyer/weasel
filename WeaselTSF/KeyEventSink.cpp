@@ -8,6 +8,16 @@ static weasel::KeyEvent prevKeyEvent;
 static BOOL prevfEaten = FALSE;
 static int keyCountToSimulate = 0;
 
+namespace {
+// {E3F8B74F-7270-4F18-B1CD-C483FF164E29}
+const GUID kTranscriptionKeyGuid = {
+    0xe3f8b74f,
+    0x7270,
+    0x4f18,
+    {0xb1, 0xcd, 0xc4, 0x83, 0xff, 0x16, 0x4e, 0x29}};
+const TF_PRESERVEDKEY kTranscriptionKey = {'F', TF_MOD_CONTROL | TF_MOD_SHIFT};
+}  // namespace
+
 void WeaselTSF::_ProcessKeyEvent(WPARAM wParam, LPARAM lParam, BOOL* pfEaten) {
   // when _IsKeyboardDisabled don't eat the key,
   // when keyboard closable and keyboard closed, don't eat the key
@@ -66,6 +76,8 @@ STDMETHODIMP WeaselTSF::OnSetFocus(BOOL fForeground) {
   if (fForeground)
     m_client.FocusIn();
   else {
+    _testKeyDown.Clear();
+    _testKeyUp.Clear();
     m_client.FocusOut();
     _AbortComposition();
   }
@@ -78,24 +90,24 @@ STDMETHODIMP WeaselTSF::OnSetFocus(BOOL fForeground) {
  *  Some sends multiple OnTestKeyDown() for a single key event. (MS WORD 2010
  * x64)
  *
- * We assume every key event will eventually cause a OnKeyDown() call.
- * We use _fTestKeyDownPending to omit multiple OnTestKeyDown() calls,
- *  and for OnKeyDown() to check if the key has already been sent to the server.
+ * Cache the identity of each handled test. If a host omits OnKeyDown(),
+ *  a later, different key must still reach the server.
  */
 
 STDMETHODIMP WeaselTSF::OnTestKeyDown(ITfContext* pContext,
                                       WPARAM wParam,
                                       LPARAM lParam,
                                       BOOL* pfEaten) {
-  _fTestKeyUpPending = FALSE;
-  if (_fTestKeyDownPending) {
+  _testKeyUp.Clear();
+  if (_testKeyDown.Matches(wParam, lParam)) {
     *pfEaten = TRUE;
     return S_OK;
   }
+  _testKeyDown.Clear();
   _ProcessKeyEvent(wParam, lParam, pfEaten);
   _UpdateComposition(pContext);
   if (*pfEaten)
-    _fTestKeyDownPending = TRUE;
+    _testKeyDown.Remember(wParam, lParam);
   return S_OK;
 }
 
@@ -103,11 +115,12 @@ STDMETHODIMP WeaselTSF::OnKeyDown(ITfContext* pContext,
                                   WPARAM wParam,
                                   LPARAM lParam,
                                   BOOL* pfEaten) {
-  _fTestKeyUpPending = FALSE;
-  if (_fTestKeyDownPending) {
-    _fTestKeyDownPending = FALSE;
+  _testKeyUp.Clear();
+  if (_testKeyDown.Matches(wParam, lParam)) {
+    _testKeyDown.Clear();
     *pfEaten = TRUE;
   } else {
+    _testKeyDown.Clear();
     _ProcessKeyEvent(wParam, lParam, pfEaten);
     _UpdateComposition(pContext);
   }
@@ -118,15 +131,16 @@ STDMETHODIMP WeaselTSF::OnTestKeyUp(ITfContext* pContext,
                                     WPARAM wParam,
                                     LPARAM lParam,
                                     BOOL* pfEaten) {
-  _fTestKeyDownPending = FALSE;
-  if (_fTestKeyUpPending) {
+  _testKeyDown.Clear();
+  if (_testKeyUp.Matches(wParam, lParam)) {
     *pfEaten = TRUE;
     return S_OK;
   }
+  _testKeyUp.Clear();
   _ProcessKeyEvent(wParam, lParam, pfEaten);
   _UpdateComposition(pContext);
   if (*pfEaten)
-    _fTestKeyUpPending = TRUE;
+    _testKeyUp.Remember(wParam, lParam);
   return S_OK;
 }
 
@@ -134,11 +148,12 @@ STDMETHODIMP WeaselTSF::OnKeyUp(ITfContext* pContext,
                                 WPARAM wParam,
                                 LPARAM lParam,
                                 BOOL* pfEaten) {
-  _fTestKeyDownPending = FALSE;
-  if (_fTestKeyUpPending) {
-    _fTestKeyUpPending = FALSE;
+  _testKeyDown.Clear();
+  if (_testKeyUp.Matches(wParam, lParam)) {
+    _testKeyUp.Clear();
     *pfEaten = TRUE;
   } else {
+    _testKeyUp.Clear();
     _ProcessKeyEvent(wParam, lParam, pfEaten);
     if (!_async_edit)
       _UpdateComposition(pContext);
@@ -150,6 +165,18 @@ STDMETHODIMP WeaselTSF::OnPreservedKey(ITfContext* pContext,
                                        REFGUID rguid,
                                        BOOL* pfEaten) {
   *pfEaten = FALSE;
+  if (!IsEqualGUID(rguid, kTranscriptionKeyGuid) ||
+      (_isToOpenClose && !_IsKeyboardOpen()) || _IsKeyboardDisabled() ||
+      !_EnsureServerConnected()) {
+    return S_OK;
+  }
+
+  // The preserved-key callback carries a command GUID, not a character or
+  // modifiers. Send the canonical chord to the same Rime processor; it decides
+  // whether composing is active and suppresses duplicate/repeated keydowns.
+  const weasel::KeyEvent key('F', ibus::CONTROL_MASK | ibus::SHIFT_MASK);
+  *pfEaten = (BOOL)m_client.ProcessKeyEvent(key);
+  _UpdateComposition(pContext);
   return S_OK;
 }
 
@@ -176,26 +203,21 @@ void WeaselTSF::_UninitKeyEventSink() {
 }
 
 BOOL WeaselTSF::_InitPreservedKey() {
+  com_ptr<ITfKeystrokeMgr> key_manager;
+  if (_pThreadMgr->QueryInterface(&key_manager) != S_OK)
+    return TRUE;
+
+  // This is an optional routing path for hosts with their own accelerators.
+  // Registration failure must not prevent the input method from activating.
+  const WCHAR description[] = L"Toggle simplified/traditional candidates";
+  key_manager->PreserveKey(_tfClientId, kTranscriptionKeyGuid,
+                           &kTranscriptionKey, description,
+                           ARRAYSIZE(description) - 1);
   return TRUE;
-#if 0
-	com_ptr<ITfKeystrokeMgr> pKeystrokeMgr;
-	if (_pThreadMgr->QueryInterface(pKeystrokeMgr.GetAddressOf()) != S_OK)
-	{
-		return FALSE;
-	}
-	TF_PRESERVEDKEY preservedKeyImeMode;
-
-	/* Define SHIFT ONLY for now */
-	preservedKeyImeMode.uVKey = VK_SHIFT;
-	preservedKeyImeMode.uModifiers = TF_MOD_ON_KEYUP;
-
-	auto hr = pKeystrokeMgr->PreserveKey(
-		_tfClientId,
-		GUID_IME_MODE_PRESERVED_KEY,
-		&preservedKeyImeMode, L"", 0);
-	
-	return SUCCEEDED(hr);
-#endif
 }
 
-void WeaselTSF::_UninitPreservedKey() {}
+void WeaselTSF::_UninitPreservedKey() {
+  com_ptr<ITfKeystrokeMgr> key_manager;
+  if (_pThreadMgr->QueryInterface(&key_manager) == S_OK)
+    key_manager->UnpreserveKey(kTranscriptionKeyGuid, &kTranscriptionKey);
+}

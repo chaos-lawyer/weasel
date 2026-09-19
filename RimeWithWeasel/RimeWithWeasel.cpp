@@ -530,6 +530,11 @@ void RimeWithWeaselHandler::OnNotify(void* context_object,
   if (!self || !message_type || !message_value)
     return;
   std::lock_guard<std::mutex> lock(m_notifier_mutex);
+  // A key event can emit more than one notification before the UI is updated.
+  // Do not let an option without a state label inherit the previous option's
+  // label and accidentally start a timed notification window.
+  m_message_label.clear();
+  m_option_name.clear();
   m_message_type = message_type;
   m_message_value = message_value;
   if (RIME_API_AVAILABLE(rime_api, get_state_label) &&
@@ -879,8 +884,12 @@ void RimeWithWeaselHandler::_LoadAppInlinePreeditSet(WeaselSessionId ipc_id,
 
 bool RimeWithWeaselHandler::_ShowMessage(Context& ctx, Status& status) {
   std::lock_guard<std::mutex> lock(m_notifier_mutex);
-  if (m_message_type.empty() || m_message_value.empty())
-    return m_ui->IsCountingDown();
+  if (m_message_type.empty() || m_message_value.empty()) {
+    // A timed status notification must not freeze a newer composing context.
+    // Returning false lets _UpdateUI cancel the timer and draw the current
+    // candidates immediately.
+    return m_ui->IsCountingDown() && !status.composing;
+  }
   // show as auxiliary string
   std::wstring& tips(ctx.aux.str);
   bool show_icon = false;
@@ -928,7 +937,7 @@ bool RimeWithWeaselHandler::_ShowMessage(Context& ctx, Status& status) {
   }
   auto counter = m_ui->IsCountingDown();
   if (!show_icon && counter)
-    return counter;
+    return !status.composing;
   auto foption = m_show_notifications.find(m_option_name);
   auto falways = m_show_notifications.find("always");
   if ((!add_session && (foption != m_show_notifications.end() ||
@@ -939,7 +948,7 @@ bool RimeWithWeaselHandler::_ShowMessage(Context& ctx, Status& status) {
       m_ui->ShowWithTimeout(m_show_notifications_time);
     return true;
   } else {
-    return m_ui->IsCountingDown();
+    return m_ui->IsCountingDown() && !status.composing;
   }
 }
 inline std::string _GetLabelText(const std::vector<Text>& labels,
