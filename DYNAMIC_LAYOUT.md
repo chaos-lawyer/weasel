@@ -55,3 +55,37 @@ env.engine.context:set_option("vertical_layout", false)
 ```
 
 Weasel 在下一次候选词刷新时会自动根据 Option 状态调整候选窗排版，直接复用当前候选窗口，窗口无闪烁、无黑屏、不关闭重建、无需切换 Schema。
+
+## 布局感知的候选导航
+
+动态布局会按当前候选窗的实际排版调整方向键语义：
+
+| 当前布局 | 上一个候选 | 下一个候选 | 上一页 | 下一页 |
+| --- | --- | --- | --- | --- |
+| 横排 | `Ctrl+Left` | `Ctrl+Right` | `Up` | `Down` |
+| 竖排 | `Up` | `Down` | `Ctrl+Left` | `Ctrl+Right` |
+
+该映射仅在候选菜单存在时生效；没有候选菜单时，`Ctrl+Left` 和 `Ctrl+Right` 仍交还应用程序处理。
+
+可在 `dynamic_layout/navigation` 中启用并调整全部按键：
+
+```yaml
+dynamic_layout:
+  navigation:
+    enabled: true
+    horizontal:
+      previous_candidate: Control+Left
+      next_candidate: Control+Right
+      previous_page: Up
+      next_page: Down
+    vertical:
+      previous_candidate: Up
+      next_candidate: Down
+      previous_page: Control+Left
+      next_page: Control+Right
+```
+
+- `enabled: false` 或省略 `navigation` 时，完全保留 Rime 原有按键逻辑。
+- 支持 `Control`（或 `Ctrl`）、`Shift`、`Alt`、`Super`（或 `Win`）修饰键。
+- 支持 `Left`、`Right`、`Up`、`Down`、`Page_Up`、`Page_Down`、`Home`、`End`。
+- 将某项设置为 `none` 可单独禁用该动作；无效按键名称会写入日志并禁用该项。

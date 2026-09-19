@@ -96,6 +96,9 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
                                 weasel::UIStyle::LayoutType configured_type);
   void _ResolveLayoutForSession(SessionStatus& session_status,
                                 const weasel::CandidateInfo& cinfo);
+  void _RemapCandidateNavigationKey(SessionStatus& session_status,
+                                    RimeSessionId session_id,
+                                    weasel::KeyEvent& key_event);
 
   void _UpdateInlinePreeditStatus(WeaselSessionId ipc_id);
 

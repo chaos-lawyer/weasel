@@ -75,6 +75,19 @@ patch:
       # 規則3：可見候選數規則（當前頁實際可見候選數量超過閾值時生效）
       - candidate_count_gt: 6
         layout: vertical
+
+    navigation:
+      enabled: true
+      horizontal:
+        previous_candidate: Control+Left
+        next_candidate: Control+Right
+        previous_page: Up
+        next_page: Down
+      vertical:
+        previous_candidate: Up
+        next_candidate: Down
+        previous_page: Control+Left
+        next_page: Control+Right
 ```
 
 * **優先級原則**：規則列表按書寫順序自上而下匹配（First match wins）。

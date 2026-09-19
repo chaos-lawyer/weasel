@@ -152,7 +152,52 @@ void test_configured_layout_inheritance() {
                                          true) == UIStyle::LAYOUT_VERTICAL);
 }
 
-// 6. 候选词文本长度规则测试
+// 6. 候选导航随布局切换
+void test_layout_aware_candidate_navigation() {
+  CandidateNavigationConfig config;
+  config.enabled = true;
+  config.horizontal.previous_candidate = {1, 10, true};
+  config.horizontal.next_candidate = {2, 10, true};
+  config.horizontal.previous_page = {3, 0, true};
+  config.horizontal.next_page = {4, 0, true};
+  config.vertical.previous_candidate = {3, 0, true};
+  config.vertical.next_candidate = {4, 0, true};
+  config.vertical.previous_page = {1, 10, true};
+  config.vertical.next_page = {2, 10, true};
+
+  BOOST_TEST(
+      ResolveCandidateNavigation(CandidateLayout::Horizontal, config, 3, 0) ==
+      CandidateNavigationAction::PreviousPage);
+  BOOST_TEST(
+      ResolveCandidateNavigation(CandidateLayout::Horizontal, config, 4, 0) ==
+      CandidateNavigationAction::NextPage);
+  BOOST_TEST(
+      ResolveCandidateNavigation(CandidateLayout::Horizontal, config, 1, 10) ==
+      CandidateNavigationAction::PreviousCandidate);
+  BOOST_TEST(
+      ResolveCandidateNavigation(CandidateLayout::Horizontal, config, 2, 10) ==
+      CandidateNavigationAction::NextCandidate);
+
+  BOOST_TEST(
+      ResolveCandidateNavigation(CandidateLayout::Vertical, config, 3, 0) ==
+      CandidateNavigationAction::PreviousCandidate);
+  BOOST_TEST(
+      ResolveCandidateNavigation(CandidateLayout::Vertical, config, 4, 0) ==
+      CandidateNavigationAction::NextCandidate);
+  BOOST_TEST(
+      ResolveCandidateNavigation(CandidateLayout::Vertical, config, 1, 10) ==
+      CandidateNavigationAction::PreviousPage);
+  BOOST_TEST(
+      ResolveCandidateNavigation(CandidateLayout::Vertical, config, 2, 10) ==
+      CandidateNavigationAction::NextPage);
+
+  config.enabled = false;
+  BOOST_TEST(
+      ResolveCandidateNavigation(CandidateLayout::Horizontal, config, 3, 0) ==
+      CandidateNavigationAction::PassThrough);
+}
+
+// 7. 候选词文本长度规则测试
 // 包含 Unicode 字符长度、中文及 Emoji 代理对
 void test_candidate_length_rules() {
   DynamicLayoutConfig config;
@@ -189,7 +234,7 @@ void test_candidate_length_rules() {
                                     no_option) == CandidateLayout::Vertical);
 }
 
-// 7. 候选词数量规则测试
+// 8. 候选词数量规则测试
 // 基于当前页实际可见候选数量
 void test_candidate_count_rules() {
   DynamicLayoutConfig config;
@@ -221,7 +266,7 @@ void test_candidate_count_rules() {
                                     no_option) == CandidateLayout::Vertical);
 }
 
-// 8. 规则优先级测试 (First match wins)
+// 9. 规则优先级测试 (First match wins)
 void test_rule_priority() {
   DynamicLayoutConfig config;
   config.enabled = true;
@@ -256,7 +301,7 @@ void test_rule_priority() {
                                     emoji_off) == CandidateLayout::Vertical);
 }
 
-// 9. 错误配置与极端情况容错测试
+// 10. 错误配置与极端情况容错测试
 void test_invalid_config_resilience() {
   DynamicLayoutConfig config;
   config.enabled = true;
@@ -287,6 +332,7 @@ int main() {
   test_option_rules();
   test_dynamic_sequence();
   test_configured_layout_inheritance();
+  test_layout_aware_candidate_navigation();
   test_candidate_length_rules();
   test_candidate_count_rules();
   test_rule_priority();

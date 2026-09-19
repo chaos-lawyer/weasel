@@ -73,6 +73,18 @@ style:
 #       layout: vertical
 #     - candidate_count_gt: 6
 #       layout: vertical
+#   navigation:
+#     enabled: false          # true：按实际横/竖排使用下列候选导航键
+#     horizontal:
+#       previous_candidate: Control+Left
+#       next_candidate: Control+Right
+#       previous_page: Up
+#       next_page: Down
+#     vertical:
+#       previous_candidate: Up
+#       next_candidate: Down
+#       previous_page: Control+Left
+#       next_page: Control+Right
 
 preset_color_schemes:
   aqua:

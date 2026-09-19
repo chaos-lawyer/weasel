@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <functional>
@@ -9,6 +10,34 @@
 namespace weasel {
 
 enum class CandidateLayout { Horizontal, Vertical };
+
+enum class CandidateNavigationAction {
+  PassThrough,
+  PreviousCandidate,
+  NextCandidate,
+  PreviousPage,
+  NextPage
+};
+
+struct CandidateNavigationKeyBinding {
+  uint32_t keycode = 0;
+  uint32_t modifiers = 0;
+  bool valid = false;
+};
+
+struct CandidateNavigationLayoutBindings {
+  CandidateNavigationKeyBinding previous_candidate;
+  CandidateNavigationKeyBinding next_candidate;
+  CandidateNavigationKeyBinding previous_page;
+  CandidateNavigationKeyBinding next_page;
+};
+
+struct CandidateNavigationConfig {
+  bool configured = false;
+  bool enabled = false;
+  CandidateNavigationLayoutBindings horizontal;
+  CandidateNavigationLayoutBindings vertical;
+};
 
 enum class LayoutRuleType {
   Invalid,
@@ -29,6 +58,7 @@ struct DynamicLayoutConfig {
   bool enabled = false;
   CandidateLayout default_layout = CandidateLayout::Horizontal;
   std::vector<DynamicLayoutRule> rules;
+  CandidateNavigationConfig navigation;
 };
 
 // A schema without its own layout selector inherits the user's configured
@@ -39,6 +69,33 @@ inline UIStyle::LayoutType ResolveConfiguredLayoutType(
     UIStyle::LayoutType parsed_schema_type,
     bool schema_overrides_layout) {
   return schema_overrides_layout ? parsed_schema_type : inherited_type;
+}
+
+// Keep navigation spatially consistent with the visible candidate layout.
+inline CandidateNavigationAction ResolveCandidateNavigation(
+    CandidateLayout layout,
+    const CandidateNavigationConfig& config,
+    uint32_t keycode,
+    uint32_t modifiers) {
+  if (!config.enabled)
+    return CandidateNavigationAction::PassThrough;
+
+  const auto& bindings =
+      layout == CandidateLayout::Vertical ? config.vertical : config.horizontal;
+  const auto matches =
+      [keycode, modifiers](const CandidateNavigationKeyBinding& binding) {
+        return binding.valid && binding.keycode == keycode &&
+               binding.modifiers == modifiers;
+      };
+  if (matches(bindings.previous_candidate))
+    return CandidateNavigationAction::PreviousCandidate;
+  if (matches(bindings.next_candidate))
+    return CandidateNavigationAction::NextCandidate;
+  if (matches(bindings.previous_page))
+    return CandidateNavigationAction::PreviousPage;
+  if (matches(bindings.next_page))
+    return CandidateNavigationAction::NextPage;
+  return CandidateNavigationAction::PassThrough;
 }
 
 // Calculate Unicode code point count (surrogate pairs in UTF-16 counted as 1).

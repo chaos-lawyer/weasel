@@ -6,6 +6,8 @@
 #include <WeaselUtility.h>
 
 #include <filesystem>
+#include <algorithm>
+#include <cctype>
 #include <map>
 #include <array>
 #include <vector>
@@ -32,6 +34,77 @@ WeaselSessionId _GenerateNewWeaselSessionId(SessionStatusMap sm, DWORD pid) {
 
 int expand_ibus_modifier(int m) {
   return (m & 0xff) | ((m & 0xff00) << 16);
+}
+
+static CandidateNavigationConfig _DefaultCandidateNavigationConfig() {
+  CandidateNavigationConfig config;
+  const auto key = [](uint32_t keycode, uint32_t modifiers = 0) {
+    return CandidateNavigationKeyBinding{keycode, modifiers, true};
+  };
+  config.horizontal.previous_candidate = key(ibus::Left, ibus::CONTROL_MASK);
+  config.horizontal.next_candidate = key(ibus::Right, ibus::CONTROL_MASK);
+  config.horizontal.previous_page = key(ibus::Up);
+  config.horizontal.next_page = key(ibus::Down);
+  config.vertical.previous_candidate = key(ibus::Up);
+  config.vertical.next_candidate = key(ibus::Down);
+  config.vertical.previous_page = key(ibus::Left, ibus::CONTROL_MASK);
+  config.vertical.next_page = key(ibus::Right, ibus::CONTROL_MASK);
+  return config;
+}
+
+static bool _ParseCandidateNavigationKey(
+    const std::string& value,
+    CandidateNavigationKeyBinding& binding) {
+  std::string normalized = value;
+  std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                 [](unsigned char ch) { return std::tolower(ch); });
+  normalized.erase(
+      std::remove_if(normalized.begin(), normalized.end(),
+                     [](unsigned char ch) { return std::isspace(ch); }),
+      normalized.end());
+  if (normalized.empty() || normalized == "none") {
+    binding = CandidateNavigationKeyBinding{};
+    return true;
+  }
+
+  uint32_t modifiers = 0;
+  size_t begin = 0;
+  std::string key_name;
+  while (begin <= normalized.size()) {
+    const size_t end = normalized.find('+', begin);
+    const std::string token = end == std::string::npos
+                                  ? normalized.substr(begin)
+                                  : normalized.substr(begin, end - begin);
+    if (end == std::string::npos) {
+      key_name = token;
+      break;
+    }
+    if (token == "control" || token == "ctrl")
+      modifiers |= ibus::CONTROL_MASK;
+    else if (token == "shift")
+      modifiers |= ibus::SHIFT_MASK;
+    else if (token == "alt")
+      modifiers |= ibus::ALT_MASK;
+    else if (token == "super" || token == "win")
+      modifiers |= ibus::SUPER_MASK;
+    else
+      return false;
+    begin = end + 1;
+  }
+
+  static const std::map<std::string, uint32_t> keycodes = {
+      {"left", ibus::Left},     {"right", ibus::Right},
+      {"up", ibus::Up},         {"down", ibus::Down},
+      {"page_up", ibus::Prior}, {"pageup", ibus::Prior},
+      {"prior", ibus::Prior},   {"page_down", ibus::Next},
+      {"pagedown", ibus::Next}, {"next", ibus::Next},
+      {"home", ibus::Home},     {"end", ibus::End},
+  };
+  const auto found = keycodes.find(key_name);
+  if (found == keycodes.end())
+    return false;
+  binding = CandidateNavigationKeyBinding{found->second, modifiers, true};
+  return true;
 }
 
 RimeWithWeaselHandler::RimeWithWeaselHandler(UI* ui)
@@ -290,6 +363,8 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
   if (m_disabled)
     return FALSE;
   RimeSessionId session_id = to_session_id(ipc_id);
+  SessionStatus& session_status = get_session_status(ipc_id);
+  _RemapCandidateNavigationKey(session_status, session_id, keyEvent);
   Bool handled = rime_api->process_key(session_id, keyEvent.keycode,
                                        expand_ibus_modifier(keyEvent.mask));
   // vim_mode when keydown only
@@ -613,10 +688,18 @@ void RimeWithWeaselHandler::_LoadSchemaSpecificSettings(
   session_status.fullscreen = !!is_fs;
   _LoadDynamicLayoutConfig(&config, session_status.dynamic_layout_config,
                            session_status.configured_layout_type);
+  const auto schema_navigation =
+      session_status.dynamic_layout_config.navigation;
   if (session_status.configured_layout_type == UIStyle::LAYOUT_AUTO &&
       session_status.dynamic_layout_config.rules.empty() &&
       !m_base_dynamic_layout.rules.empty()) {
     session_status.dynamic_layout_config = m_base_dynamic_layout;
+  }
+  if (schema_navigation.configured) {
+    session_status.dynamic_layout_config.navigation = schema_navigation;
+  } else {
+    session_status.dynamic_layout_config.navigation =
+        m_base_dynamic_layout.navigation;
   }
   if (session_status.configured_layout_type == UIStyle::LAYOUT_AUTO) {
     style.layout_type =
@@ -1231,9 +1314,49 @@ void RimeWithWeaselHandler::_LoadDynamicLayoutConfig(
     UIStyle::LayoutType configured_type) {
   dlc.rules.clear();
   dlc.enabled = (configured_type == UIStyle::LAYOUT_AUTO);
+  dlc.navigation = _DefaultCandidateNavigationConfig();
   weasel::CandidateLayout default_layout = weasel::CandidateLayout::Horizontal;
   constexpr int BUF_SIZE = 255;
   char buffer[BUF_SIZE + 1] = {0};
+  Bool navigation_enabled = False;
+  if (rime_api->config_get_bool(config, "dynamic_layout/navigation/enabled",
+                                &navigation_enabled)) {
+    dlc.navigation.configured = true;
+    dlc.navigation.enabled = !!navigation_enabled;
+  }
+
+  const auto load_navigation_binding =
+      [config, &dlc, &buffer](const char* path,
+                              CandidateNavigationKeyBinding& binding) {
+        if (!rime_api->config_get_string(config, path, buffer,
+                                         static_cast<int>(sizeof(buffer) - 1)))
+          return;
+        dlc.navigation.configured = true;
+        if (!_ParseCandidateNavigationKey(buffer, binding)) {
+          LOG(WARNING) << "DynamicLayout: invalid navigation key '" << buffer
+                       << "' at " << path << ", binding disabled";
+          binding = CandidateNavigationKeyBinding{};
+        }
+      };
+  load_navigation_binding(
+      "dynamic_layout/navigation/horizontal/previous_candidate",
+      dlc.navigation.horizontal.previous_candidate);
+  load_navigation_binding("dynamic_layout/navigation/horizontal/next_candidate",
+                          dlc.navigation.horizontal.next_candidate);
+  load_navigation_binding("dynamic_layout/navigation/horizontal/previous_page",
+                          dlc.navigation.horizontal.previous_page);
+  load_navigation_binding("dynamic_layout/navigation/horizontal/next_page",
+                          dlc.navigation.horizontal.next_page);
+  load_navigation_binding(
+      "dynamic_layout/navigation/vertical/previous_candidate",
+      dlc.navigation.vertical.previous_candidate);
+  load_navigation_binding("dynamic_layout/navigation/vertical/next_candidate",
+                          dlc.navigation.vertical.next_candidate);
+  load_navigation_binding("dynamic_layout/navigation/vertical/previous_page",
+                          dlc.navigation.vertical.previous_page);
+  load_navigation_binding("dynamic_layout/navigation/vertical/next_page",
+                          dlc.navigation.vertical.next_page);
+
   if (rime_api->config_get_string(config, "dynamic_layout/default", buffer,
                                   BUF_SIZE)) {
     if (strcmp(buffer, "vertical") == 0) {
@@ -1366,6 +1489,55 @@ void RimeWithWeaselHandler::_ResolveLayoutForSession(
     if (m_ui) {
       m_ui->style().layout_type = target_type;
     }
+  }
+}
+
+void RimeWithWeaselHandler::_RemapCandidateNavigationKey(
+    SessionStatus& session_status,
+    RimeSessionId session_id,
+    KeyEvent& key_event) {
+  const auto layout_type = session_status.style.layout_type;
+  const bool vertical = layout_type == UIStyle::LAYOUT_VERTICAL ||
+                        layout_type == UIStyle::LAYOUT_VERTICAL_FULLSCREEN ||
+                        layout_type == UIStyle::LAYOUT_VERTICAL_TEXT;
+  const auto layout = vertical ? weasel::CandidateLayout::Vertical
+                               : weasel::CandidateLayout::Horizontal;
+  constexpr uint32_t kNavigationModifiers =
+      ibus::SHIFT_MASK | ibus::CONTROL_MASK | ibus::ALT_MASK |
+      ibus::SUPER_MASK | ibus::HYPER_MASK | ibus::META_MASK;
+  const auto action = weasel::ResolveCandidateNavigation(
+      layout, session_status.dynamic_layout_config.navigation,
+      key_event.keycode, key_event.mask & kNavigationModifiers);
+  if (action == weasel::CandidateNavigationAction::PassThrough)
+    return;
+
+  RIME_STRUCT(RimeContext, context);
+  if (!rime_api->get_context(session_id, &context))
+    return;
+  const bool has_candidates = context.menu.num_candidates > 0;
+  rime_api->free_context(&context);
+  if (!has_candidates)
+    return;
+
+  switch (action) {
+    case weasel::CandidateNavigationAction::PreviousCandidate:
+      key_event.keycode = ibus::Up;
+      key_event.mask &= ~kNavigationModifiers;
+      break;
+    case weasel::CandidateNavigationAction::NextCandidate:
+      key_event.keycode = ibus::Down;
+      key_event.mask &= ~kNavigationModifiers;
+      break;
+    case weasel::CandidateNavigationAction::PreviousPage:
+      key_event.keycode = ibus::Prior;
+      key_event.mask &= ~kNavigationModifiers;
+      break;
+    case weasel::CandidateNavigationAction::NextPage:
+      key_event.keycode = ibus::Next;
+      key_event.mask &= ~kNavigationModifiers;
+      break;
+    case weasel::CandidateNavigationAction::PassThrough:
+      break;
   }
 }
 
