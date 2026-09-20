@@ -700,8 +700,6 @@ void RimeWithWeaselHandler::_UpdateUI(WeaselSessionId ipc_id) {
   _GetStatus(weasel_status, ipc_id, weasel_context);
 
   SessionStatus& session_status = get_session_status(ipc_id);
-  _GetContext(weasel_context, session_id);
-  _ResolveLayoutForSession(session_status, weasel_context.cinfo);
   if (rime_api->get_option(session_id, "inline_preedit"))
     session_status.style.client_caps |= INLINE_PREEDIT_CAPABLE;
   else

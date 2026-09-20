@@ -3,7 +3,6 @@
 #include "Globals.h"
 #include <WeaselIPC.h>
 #include <WeaselIPCData.h>
-#include <KeyEventCache.h>
 
 class CCandidateList;
 class CLangBarItemButton;
@@ -206,7 +205,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   com_ptr<ITfContext> _pTextEditSinkContext;
   DWORD _dwTextEditSinkCookie, _dwTextLayoutSinkCookie;
   BYTE _lpbKeyState[256];
-  weasel::KeyEventCache _testKeyDown, _testKeyUp;
+  BOOL _fTestKeyDownPending, _fTestKeyUpPending;
 
   com_ptr<ITfContext> _pEditSessionContext;
   std::wstring _editSessionText;

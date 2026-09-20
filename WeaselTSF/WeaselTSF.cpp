@@ -27,6 +27,8 @@ WeaselTSF::WeaselTSF() {
   _dwTextEditSinkCookie = TF_INVALID_COOKIE;
   _dwTextLayoutSinkCookie = TF_INVALID_COOKIE;
   _dwThreadFocusSinkCookie = TF_INVALID_COOKIE;
+  _fTestKeyDownPending = FALSE;
+  _fTestKeyUpPending = FALSE;
 
   _fCUASWorkaroundTested = _fCUASWorkaroundEnabled = FALSE;
 
