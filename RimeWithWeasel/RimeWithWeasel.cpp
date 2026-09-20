@@ -918,10 +918,12 @@ bool RimeWithWeaselHandler::_ShowMessage(Context& ctx, Status& status) {
     tips = /*L"【" + */ status.schema_name /* + L"】"*/;
   } else if (m_message_type == "option") {
     status.type = SCHEMA;
-    if (m_message_value == "!ascii_mode") {
+    if (m_message_value == "!ascii_mode" || m_message_value == "ascii_mode") {
       show_icon = true;
-    } else if (m_message_value == "ascii_mode") {
+    } else if (m_message_value == "full_shape" ||
+               m_message_value == "!full_shape") {
       show_icon = true;
+      status.type = FULL_SHAPE;
     } else {
       tips = u8tow(m_message_label);
       // Internal options (for example a dynamic-layout trigger) have no state
@@ -929,9 +931,6 @@ bool RimeWithWeaselHandler::_ShowMessage(Context& ctx, Status& status) {
       if (tips.empty())
         return false;
     }
-
-    if (m_message_value == "full_shape" || m_message_value == "!full_shape")
-      status.type = FULL_SHAPE;
   }
   auto counter = m_ui->IsCountingDown();
   if (!show_icon && counter)
