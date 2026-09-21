@@ -74,6 +74,8 @@ style:
     padding_y: 10          # 详情面板内部垂直边距
     # --- 外观与排版样式（未设置时默认 100% 自动继承当前皮肤主候选/批注样式）---
     # font_face: "Segoe UI, Microsoft YaHei" # 独立字体（缺省时继承 comment_font_face 或 font_face）
+    # han_font_face: "Your Han font" # 仅汉字使用的字体（可选；未设则沿用 font_face）
+    # latin_font_face: "Your Latin font" # 仅拉丁文字、数字使用的字体（可选；未设则沿用 font_face）
     # font_point: 10.5     # 独立字号（缺省时继承 comment_font_point 或 font_point）
     # linespacing: 4       # 行间距（单位 px，默认 0）
     # corner_radius: 6     # 独立圆角半径（缺省时继承皮肤 round_corner）

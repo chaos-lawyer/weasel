@@ -21,7 +21,47 @@ using namespace weasel;
 
 namespace {
 
-constexpr wchar_t kDetailNumberFontFace[] = L"Cascadia Mono";
+bool IsHanCharacter(wchar_t character) {
+  return (character >= 0x3400 && character <= 0x4DBF) ||
+         (character >= 0x4E00 && character <= 0x9FFF) ||
+         (character >= 0xF900 && character <= 0xFAFF) || character == 0x3007;
+}
+
+bool IsLatinCharacter(wchar_t character) {
+  return character <= 0x024F || (character >= 0x1E00 && character <= 0x1EFF);
+}
+
+template <typename Predicate>
+void ApplyFontFamily(IDWriteTextLayout* text_layout,
+                     const std::wstring& text,
+                     const std::wstring& font_face,
+                     Predicate predicate) {
+  if (font_face.empty()) {
+    return;
+  }
+
+  size_t range_start = std::wstring::npos;
+  for (size_t i = 0; i <= text.length(); ++i) {
+    const bool matches = i < text.length() && predicate(text[i]);
+    if (matches && range_start == std::wstring::npos) {
+      range_start = i;
+    } else if (!matches && range_start != std::wstring::npos) {
+      const DWRITE_TEXT_RANGE range = {static_cast<UINT32>(range_start),
+                                       static_cast<UINT32>(i - range_start)};
+      text_layout->SetFontFamilyName(font_face.c_str(), range);
+      range_start = std::wstring::npos;
+    }
+  }
+}
+
+void ApplyConfiguredFonts(IDWriteTextLayout* text_layout,
+                          const std::wstring& text,
+                          const UIStyle& style) {
+  ApplyFontFamily(text_layout, text, style.detail_han_font_face,
+                  IsHanCharacter);
+  ApplyFontFamily(text_layout, text, style.detail_latin_font_face,
+                  IsLatinCharacter);
+}
 
 }  // namespace
 
@@ -179,6 +219,8 @@ void WeaselDetailPanel::Update(const std::wstring& detail_text,
   if (!pTextLayout) {
     return;
   }
+
+  ApplyConfiguredFonts(pTextLayout.Get(), detail_text, m_style);
 
   DWRITE_TEXT_METRICS metrics;
   HR(pTextLayout->GetMetrics(&metrics));
@@ -458,6 +500,8 @@ void WeaselDetailPanel::_Render(const std::wstring& detail_text,
               pTextLayout.ReleaseAndGetAddressOf());
 
           if (pTextLayout) {
+            ApplyConfiguredFonts(pTextLayout.Get(), detail_text, m_style);
+
             if (m_style.detail_max_lines > 0) {
               std::vector<DWRITE_LINE_METRICS> lineMetrics(
                   m_style.detail_max_lines);
@@ -580,25 +624,6 @@ void WeaselDetailPanel::_Render(const std::wstring& detail_text,
                       (UINT32)(line.length() - colon_pos - 1)};
                   pTextLayout->SetFontWeight(DWRITE_FONT_WEIGHT_MEDIUM,
                                              val_range);
-                }
-              }
-
-              // Dates, document numbers and other Latin digits are easier to
-              // scan when they use a restrained monospaced face. DirectWrite
-              // falls back gracefully if Cascadia Mono is unavailable.
-              size_t digit_start = std::wstring::npos;
-              for (size_t i = 0; i <= line.length(); ++i) {
-                const bool is_digit =
-                    i < line.length() && line[i] >= L'0' && line[i] <= L'9';
-                if (is_digit && digit_start == std::wstring::npos) {
-                  digit_start = i;
-                } else if (!is_digit && digit_start != std::wstring::npos) {
-                  const DWRITE_TEXT_RANGE digit_range = {
-                      static_cast<UINT32>(line_start + digit_start),
-                      static_cast<UINT32>(i - digit_start)};
-                  pTextLayout->SetFontFamilyName(kDetailNumberFontFace,
-                                                 digit_range);
-                  digit_start = std::wstring::npos;
                 }
               }
 

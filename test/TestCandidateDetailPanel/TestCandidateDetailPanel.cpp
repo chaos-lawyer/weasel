@@ -194,6 +194,8 @@ void test_ui_style_defaults() {
   BOOST_TEST_EQ(style1.detail_width, 320);
   BOOST_TEST_EQ(style1.detail_max_lines, 0);
   BOOST_TEST_EQ(style1.detail_font_point, 0);
+  BOOST_TEST(style1.detail_han_font_face.empty());
+  BOOST_TEST(style1.detail_latin_font_face.empty());
   BOOST_TEST_EQ(style1.detail_corner_radius, -1);
   BOOST_TEST_EQ(style1.detail_border_width, -1);
   BOOST_TEST_EQ(style1.detail_linespacing, 0);
@@ -221,6 +223,14 @@ void test_ui_style_defaults() {
 
   style2.detail_draw_line_separators = true;
   style1.detail_font_point = 11;
+  BOOST_TEST(style1 != style2);
+
+  style2.detail_font_point = 11;
+  style1.detail_han_font_face = L"A configurable Han font";
+  BOOST_TEST(style1 != style2);
+
+  style2.detail_han_font_face = L"A configurable Han font";
+  style1.detail_latin_font_face = L"A configurable Latin font";
   BOOST_TEST(style1 != style2);
 }
 

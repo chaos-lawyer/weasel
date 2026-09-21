@@ -320,6 +320,8 @@ struct UIStyle {
   int detail_border_color;
   int detail_shadow_color;
   std::wstring detail_font_face;
+  std::wstring detail_han_font_face;
+  std::wstring detail_latin_font_face;
   int detail_font_point;
   int detail_corner_radius;
   int detail_border_width;
@@ -412,6 +414,8 @@ struct UIStyle {
         detail_border_color(0),
         detail_shadow_color(0),
         detail_font_face(),
+        detail_han_font_face(),
+        detail_latin_font_face(),
         detail_font_point(0),
         detail_corner_radius(-1),
         detail_border_width(-1),
@@ -491,6 +495,8 @@ struct UIStyle {
         detail_border_color != st.detail_border_color ||
         detail_shadow_color != st.detail_shadow_color ||
         detail_font_face != st.detail_font_face ||
+        detail_han_font_face != st.detail_han_font_face ||
+        detail_latin_font_face != st.detail_latin_font_face ||
         detail_font_point != st.detail_font_point ||
         detail_corner_radius != st.detail_corner_radius ||
         detail_border_width != st.detail_border_width ||
@@ -602,6 +608,10 @@ void serialize(Archive& ar, weasel::UIStyle& s, const unsigned int version) {
     ar & s.detail_line_separator_color;
     ar & s.detail_key_text_color;
   }
+  if (version >= 2) {
+    ar & s.detail_han_font_face;
+    ar & s.detail_latin_font_face;
+  }
 }
 
 template <typename Archive>
@@ -640,5 +650,5 @@ void serialize(Archive& ar, weasel::TextRange& s, const unsigned int version) {
 }  // namespace serialization
 }  // namespace boost
 BOOST_CLASS_VERSION(weasel::CandidateInfo, 1)
-BOOST_CLASS_VERSION(weasel::UIStyle, 1)
+BOOST_CLASS_VERSION(weasel::UIStyle, 2)
 #endif

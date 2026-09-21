@@ -1858,6 +1858,10 @@ static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
                  style.detail_padding_y, 0, 0, _abs);
   _RimeGetIntStr(config, "style/candidate_detail_panel/font_face",
                  style.detail_font_face, 0, 0, rmspace);
+  _RimeGetIntStr(config, "style/candidate_detail_panel/han_font_face",
+                 style.detail_han_font_face, 0, 0, rmspace);
+  _RimeGetIntStr(config, "style/candidate_detail_panel/latin_font_face",
+                 style.detail_latin_font_face, 0, 0, rmspace);
   _RimeGetIntStr(config, "style/candidate_detail_panel/font_point",
                  style.detail_font_point, 0, 0, _abs);
   _RimeGetIntStr(config, "style/candidate_detail_panel/corner_radius",
