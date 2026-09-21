@@ -12,9 +12,9 @@
 #endif
 
 #ifndef GDPCOLOR_FROM_COLORREF
-#define GDPCOLOR_FROM_COLORREF(color)                                  \
-  Gdiplus::Color(GetAValue(color), GetRValue(color), GetGValue(color), \
-                 GetBValue(color))
+#define GDPCOLOR_FROM_COLORREF(color)                                \
+  Gdiplus::Color::MakeARGB(((color >> 24) & 0xff), GetRValue(color), \
+                           GetGValue(color), GetBValue(color))
 #endif
 
 using namespace weasel;
@@ -332,11 +332,7 @@ void WeaselDetailPanel::_Render(const std::wstring& detail_text,
         rcPanel.Width() + blurMarginX + DPI_SCALE(m_style.shadow_offset_x),
         rcPanel.Height() + blurMarginY + DPI_SCALE(m_style.shadow_offset_y));
 
-    BYTE r = GetRValue(shadow_color);
-    BYTE g = GetGValue(shadow_color);
-    BYTE b = GetBValue(shadow_color);
-    BYTE alpha = (BYTE)((shadow_color >> 24) & 255);
-    Gdiplus::Color gShadowColor = Gdiplus::Color::MakeARGB(alpha, r, g, b);
+    Gdiplus::Color gShadowColor = GDPCOLOR_FROM_COLORREF(shadow_color);
 
     Gdiplus::Bitmap shadowBmp(win_width, win_height, PixelFormat32bppPARGB);
     Gdiplus::Graphics gShadow(&shadowBmp);
