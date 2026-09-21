@@ -20,8 +20,7 @@
 using namespace weasel;
 
 WeaselDetailPanel::WeaselDetailPanel(weasel::UI& ui)
-    : m_ui(ui),
-      m_style(ui.style()),
+    : m_style(ui.style()),
       m_last_candidate_index(-1),
       m_last_dpi(96),
       m_dpiScaleLayout(1.0f),
@@ -93,30 +92,31 @@ void WeaselDetailPanel::_UpdateDpi(const CRect& rcCandidate) {
 
 void WeaselDetailPanel::Update(const std::wstring& detail_text,
                                int candidate_index,
-                               const CRect& rcCandidate) {
+                               const CRect& rcCandidate,
+                               const PDWR& pdwr) {
   if (!m_style.detail_enabled || detail_text.empty()) {
     Hide();
     return;
   }
 
+  const UINT previous_dpi = m_last_dpi;
   _UpdateDpi(rcCandidate);
 
   // If text, candidate, dpi, and candidate position are all identical, no-op
   if (m_last_detail_text == detail_text &&
-      m_last_candidate_index == candidate_index && m_last_dpi == m_last_dpi &&
+      m_last_candidate_index == candidate_index && previous_dpi == m_last_dpi &&
       m_last_candidate_rect == rcCandidate && IsWindowVisible()) {
     return;
   }
 
   // If text, candidate, and dpi are identical, just reposition
   if (m_last_detail_text == detail_text &&
-      m_last_candidate_index == candidate_index && m_last_dpi == m_last_dpi &&
+      m_last_candidate_index == candidate_index && previous_dpi == m_last_dpi &&
       IsWindowVisible()) {
     Reposition(rcCandidate);
     return;
   }
 
-  auto pdwr = m_ui.pdwr();
   if (!pdwr || !pdwr->pDWFactory) {
     return;
   }
@@ -159,11 +159,11 @@ void WeaselDetailPanel::Update(const std::wstring& detail_text,
   pTextFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
 
   if (m_style.detail_linespacing > 0) {
-    float linespacing =
-        m_dpiScaleFontPoint * ((float)m_style.detail_linespacing / 100.0f);
-    pTextFormat->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
-                                font_point * linespacing,
-                                font_point * linespacing * 0.8f);
+    const float font_size = font_point * m_dpiScaleFontPoint;
+    const float line_height =
+        font_size + DPI_SCALE(m_style.detail_linespacing);
+    pTextFormat->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, line_height,
+                                font_size * 0.8f);
   }
 
   ComPtr<IDWriteTextLayout> pTextLayout;
@@ -244,8 +244,8 @@ void WeaselDetailPanel::Update(const std::wstring& detail_text,
   m_last_candidate_index = candidate_index;
   m_last_candidate_rect = rcCandidate;
 
-  _Render(detail_text, pos, content_width, content_height, padding_x,
-          padding_y);
+  _Render(detail_text, pos, content_width, content_height, padding_x, padding_y,
+          pdwr);
 
   Show();
 }
@@ -298,7 +298,8 @@ void WeaselDetailPanel::_Render(const std::wstring& detail_text,
                                 int content_width,
                                 int content_height,
                                 int padding_x,
-                                int padding_y) {
+                                int padding_y,
+                                const PDWR& pdwr) {
   if (!IsWindow()) {
     return;
   }
@@ -396,7 +397,6 @@ void WeaselDetailPanel::_Render(const std::wstring& detail_text,
   }
 
   // Draw text using DirectWrite
-  auto pdwr = m_ui.pdwr();
   if (pdwr && pdwr->pDWFactory && pdwr->pD2d1Factory) {
     if (!m_pRenderTarget) {
       D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
@@ -436,11 +436,11 @@ void WeaselDetailPanel::_Render(const std::wstring& detail_text,
           pTextFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
 
           if (m_style.detail_linespacing > 0) {
-            float linespacing = m_dpiScaleFontPoint *
-                                ((float)m_style.detail_linespacing / 100.0f);
+            const float font_size = font_point * m_dpiScaleFontPoint;
+            const float line_height =
+                font_size + DPI_SCALE(m_style.detail_linespacing);
             pTextFormat->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
-                                        font_point * linespacing,
-                                        font_point * linespacing * 0.8f);
+                                        line_height, font_size * 0.8f);
           }
 
           float max_text_width = (float)max(20, content_width - 2 * padding_x);

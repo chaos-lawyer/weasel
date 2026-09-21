@@ -36,7 +36,8 @@ class WeaselDetailPanel
 
   void Update(const std::wstring& detail_text,
               int candidate_index,
-              const CRect& rcCandidate);
+              const CRect& rcCandidate,
+              const PDWR& pdwr);
   void Reposition(const CRect& rcCandidate);
   void Show();
   void Hide();
@@ -54,9 +55,9 @@ class WeaselDetailPanel
                int content_width,
                int content_height,
                int padding_x,
-               int padding_y);
+               int padding_y,
+               const PDWR& pdwr);
 
-  weasel::UI& m_ui;
   weasel::UIStyle& m_style;
 
   std::wstring m_last_detail_text;
