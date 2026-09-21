@@ -32,6 +32,54 @@ static_assert(select_keys_ibus::HYPER_MASK == ibus::HYPER_MASK);
 static_assert(select_keys_ibus::META_MASK == ibus::META_MASK);
 
 static RimeApi* rime_api;
+
+struct DisplayPreedit {
+  std::string text;
+  size_t internal_prefix_length = 0;
+  size_t display_prefix_length = 0;
+};
+
+static DisplayPreedit _GetDisplayPreedit(RimeSessionId session_id,
+                                         const char* preedit) {
+  DisplayPreedit result;
+  result.text = preedit ? preedit : "";
+  if (!session_id || result.text.empty()) {
+    return result;
+  }
+
+  char display[256] = {0};
+  char internal_prefix[64] = {0};
+  if (!rime_api->get_property(session_id, "tab_mode_display", display,
+                              sizeof(display)) ||
+      !rime_api->get_property(session_id, "tab_mode_prefix", internal_prefix,
+                              sizeof(internal_prefix)) ||
+      display[0] == '\0' || internal_prefix[0] == '\0') {
+    return result;
+  }
+
+  const size_t prefix_length = strlen(internal_prefix);
+  if (result.text.compare(0, prefix_length, internal_prefix) != 0) {
+    return result;
+  }
+
+  result.text.replace(0, prefix_length, display);
+  result.internal_prefix_length = prefix_length;
+  result.display_prefix_length = strlen(display);
+  return result;
+}
+
+static int _MapDisplayPreeditPosition(int position,
+                                      const DisplayPreedit& preedit) {
+  if (position <= 0 || preedit.internal_prefix_length == 0) {
+    return std::max(position, 0);
+  }
+  if (static_cast<size_t>(position) <= preedit.internal_prefix_length) {
+    return static_cast<int>(preedit.display_prefix_length);
+  }
+  return position - static_cast<int>(preedit.internal_prefix_length) +
+         static_cast<int>(preedit.display_prefix_length);
+}
+
 WeaselSessionId _GenerateNewWeaselSessionId(SessionStatusMap sm, DWORD pid) {
   if (sm.empty())
     return (WeaselSessionId)(pid + 1);
@@ -1033,10 +1081,15 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
     }
     _ResolveLayoutForSession(session_status, cinfo);
     if (is_composing) {
-      const auto& preedit = ctx.composition.preedit;
-      const auto& start = ctx.composition.sel_start;
-      const auto& end = ctx.composition.sel_end;
-      const auto& cursor = ctx.composition.cursor_pos;
+      const DisplayPreedit display_preedit =
+          _GetDisplayPreedit(session_id, ctx.composition.preedit);
+      const char* preedit = display_preedit.text.c_str();
+      const int start = _MapDisplayPreeditPosition(ctx.composition.sel_start,
+                                                   display_preedit);
+      const int end =
+          _MapDisplayPreeditPosition(ctx.composition.sel_end, display_preedit);
+      const int cursor = _MapDisplayPreeditPosition(ctx.composition.cursor_pos,
+                                                    display_preedit);
       static const auto u8towstring = [](const char* u8str, int len = 0) {
         return std::to_wstring(utf8towcslen(u8str, len));
       };
@@ -2020,14 +2073,20 @@ void RimeWithWeaselHandler::_GetContext(Context& weasel_context,
   RIME_STRUCT(RimeContext, ctx);
   if (rime_api->get_context(session_id, &ctx)) {
     if (ctx.composition.length > 0) {
-      weasel_context.preedit.str = u8tow(ctx.composition.preedit);
+      const DisplayPreedit display_preedit =
+          _GetDisplayPreedit(session_id, ctx.composition.preedit);
+      weasel_context.preedit.str = u8tow(display_preedit.text);
       if (ctx.composition.sel_start < ctx.composition.sel_end) {
         TextAttribute attr;
         attr.type = HIGHLIGHTED;
         attr.range.start =
-            utf8towcslen(ctx.composition.preedit, ctx.composition.sel_start);
+            utf8towcslen(display_preedit.text.c_str(),
+                         _MapDisplayPreeditPosition(ctx.composition.sel_start,
+                                                    display_preedit));
         attr.range.end =
-            utf8towcslen(ctx.composition.preedit, ctx.composition.sel_end);
+            utf8towcslen(display_preedit.text.c_str(),
+                         _MapDisplayPreeditPosition(ctx.composition.sel_end,
+                                                    display_preedit));
 
         weasel_context.preedit.attributes.push_back(attr);
       }
