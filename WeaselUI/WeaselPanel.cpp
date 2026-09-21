@@ -205,8 +205,8 @@ void WeaselPanel::_UpdateDetailPanel() {
 
   CRect rcCandidate;
   GetWindowRect(&rcCandidate);
-  m_detailPanel.Update(m_ctx.cinfo.current_detail.str, m_ctx.cinfo.highlighted,
-                       rcCandidate, pDWR);
+  m_detailPanel.Update(m_ctx.cinfo.current_detail.str,
+                       m_ctx.cinfo.highlighted, rcCandidate, pDWR);
 }
 
 void WeaselPanel::_InitFontRes(bool forced) {

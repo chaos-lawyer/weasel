@@ -160,8 +160,7 @@ void WeaselDetailPanel::Update(const std::wstring& detail_text,
 
   if (m_style.detail_linespacing > 0) {
     const float font_size = font_point * m_dpiScaleFontPoint;
-    const float line_height =
-        font_size + DPI_SCALE(m_style.detail_linespacing);
+    const float line_height = font_size + DPI_SCALE(m_style.detail_linespacing);
     pTextFormat->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, line_height,
                                 font_size * 0.8f);
   }
