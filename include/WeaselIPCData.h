@@ -318,6 +318,12 @@ struct UIStyle {
   int detail_text_color;
   int detail_back_color;
   int detail_border_color;
+  int detail_shadow_color;
+  std::wstring detail_font_face;
+  int detail_font_point;
+  int detail_corner_radius;
+  int detail_border_width;
+  int detail_linespacing;
 
   UIStyle()
       : font_face(),
@@ -400,7 +406,13 @@ struct UIStyle {
         detail_padding_y(10),
         detail_text_color(0),
         detail_back_color(0),
-        detail_border_color(0) {}
+        detail_border_color(0),
+        detail_shadow_color(0),
+        detail_font_face(),
+        detail_font_point(0),
+        detail_corner_radius(-1),
+        detail_border_width(-1),
+        detail_linespacing(0) {}
   bool operator!=(const UIStyle& st) const {
     return (
         align_type != st.align_type || antialias_mode != st.antialias_mode ||
@@ -470,7 +482,13 @@ struct UIStyle {
         detail_padding_y != st.detail_padding_y ||
         detail_text_color != st.detail_text_color ||
         detail_back_color != st.detail_back_color ||
-        detail_border_color != st.detail_border_color);
+        detail_border_color != st.detail_border_color ||
+        detail_shadow_color != st.detail_shadow_color ||
+        detail_font_face != st.detail_font_face ||
+        detail_font_point != st.detail_font_point ||
+        detail_corner_radius != st.detail_corner_radius ||
+        detail_border_width != st.detail_border_width ||
+        detail_linespacing != st.detail_linespacing);
   }
   bool operator==(const UIStyle& st) const { return !(*this != st); }
 };
@@ -565,6 +583,12 @@ void serialize(Archive& ar, weasel::UIStyle& s, const unsigned int version) {
     ar & s.detail_text_color;
     ar & s.detail_back_color;
     ar & s.detail_border_color;
+    ar & s.detail_shadow_color;
+    ar & s.detail_font_face;
+    ar & s.detail_font_point;
+    ar & s.detail_corner_radius;
+    ar & s.detail_border_width;
+    ar & s.detail_linespacing;
   }
 }
 

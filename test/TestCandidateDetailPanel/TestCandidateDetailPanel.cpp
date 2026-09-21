@@ -193,6 +193,12 @@ void test_ui_style_defaults() {
   BOOST_TEST_EQ(style1.detail_gap, 8);
   BOOST_TEST_EQ(style1.detail_width, 320);
   BOOST_TEST_EQ(style1.detail_max_lines, 0);
+  BOOST_TEST_EQ(style1.detail_font_point, 0);
+  BOOST_TEST_EQ(style1.detail_corner_radius, -1);
+  BOOST_TEST_EQ(style1.detail_border_width, -1);
+  BOOST_TEST_EQ(style1.detail_linespacing, 0);
+  BOOST_TEST_EQ(style1.detail_border_color, 0);
+  BOOST_TEST_EQ(style1.detail_shadow_color, 0);
   BOOST_TEST(style1 == style1);
   BOOST_TEST(!(style1 != style2));
 
@@ -204,6 +210,10 @@ void test_ui_style_defaults() {
   BOOST_TEST(!(style1 != style2));
 
   style1.detail_position = UIStyle::DETAIL_POS_LEFT;
+  BOOST_TEST(style1 != style2);
+
+  style2.detail_position = UIStyle::DETAIL_POS_LEFT;
+  style1.detail_font_point = 11;
   BOOST_TEST(style1 != style2);
 }
 

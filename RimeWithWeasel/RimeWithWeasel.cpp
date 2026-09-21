@@ -1856,6 +1856,16 @@ static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
                  style.detail_padding_x, 0, 0, _abs);
   _RimeGetIntStr(config, "style/candidate_detail_panel/padding_y",
                  style.detail_padding_y, 0, 0, _abs);
+  _RimeGetIntStr(config, "style/candidate_detail_panel/font_face",
+                 style.detail_font_face, 0, 0, rmspace);
+  _RimeGetIntStr(config, "style/candidate_detail_panel/font_point",
+                 style.detail_font_point, 0, 0, _abs);
+  _RimeGetIntStr(config, "style/candidate_detail_panel/corner_radius",
+                 style.detail_corner_radius, 0, 0, _abs);
+  _RimeGetIntStr(config, "style/candidate_detail_panel/border_width",
+                 style.detail_border_width, 0, 0, _abs);
+  _RimeGetIntStr(config, "style/candidate_detail_panel/linespacing",
+                 style.detail_linespacing, 0, 0, _abs);
   // get color scheme
   const int BUF_SIZE = 255;
   char buffer[BUF_SIZE + 1] = {0};
@@ -1925,6 +1935,8 @@ static bool _UpdateUIStyleColor(RimeConfig* config,
     COLOR("candidate_detail_border_color", style.detail_border_color,
           style.candidate_border_color ? style.candidate_border_color
                                        : style.border_color);
+    COLOR("candidate_detail_shadow_color", style.detail_shadow_color,
+          style.shadow_color);
 #undef COLOR
     return true;
   }

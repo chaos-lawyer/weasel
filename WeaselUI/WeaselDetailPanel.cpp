@@ -120,12 +120,17 @@ void WeaselDetailPanel::Update(const std::wstring& detail_text,
   }
 
   // Font setup
-  const std::wstring font_face = m_style.comment_font_face.empty()
-                                     ? m_style.font_face
-                                     : m_style.comment_font_face;
-  int font_point = m_style.comment_font_point > 0
-                       ? m_style.comment_font_point
-                       : (m_style.font_point > 0 ? m_style.font_point : 12);
+  const std::wstring font_face =
+      !m_style.detail_font_face.empty()
+          ? m_style.detail_font_face
+          : (m_style.comment_font_face.empty() ? m_style.font_face
+                                               : m_style.comment_font_face);
+  int font_point =
+      m_style.detail_font_point > 0
+          ? m_style.detail_font_point
+          : (m_style.comment_font_point > 0
+                 ? m_style.comment_font_point
+                 : (m_style.font_point > 0 ? m_style.font_point : 12));
 
   int configured_width =
       DPI_SCALE(m_style.detail_width > 0 ? m_style.detail_width : 320);
@@ -150,6 +155,14 @@ void WeaselDetailPanel::Update(const std::wstring& detail_text,
   pTextFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
   pTextFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
   pTextFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+
+  if (m_style.detail_linespacing > 0) {
+    float linespacing =
+        m_dpiScaleFontPoint * ((float)m_style.detail_linespacing / 100.0f);
+    pTextFormat->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
+                                font_point * linespacing,
+                                font_point * linespacing * 0.8f);
+  }
 
   ComPtr<IDWriteTextLayout> pTextLayout;
   HR(pdwr->pDWFactory->CreateTextLayout(
@@ -320,10 +333,15 @@ void WeaselDetailPanel::_Render(const std::wstring& detail_text,
 
   CRect rcPanel(blurMarginX, blurMarginY, blurMarginX + content_width,
                 blurMarginY + content_height);
-  int round_corner = DPI_SCALE(m_style.round_corner_ex ? m_style.round_corner_ex
-                                                       : m_style.round_corner);
+  int round_corner =
+      m_style.detail_corner_radius >= 0
+          ? DPI_SCALE(m_style.detail_corner_radius)
+          : DPI_SCALE(m_style.round_corner_ex ? m_style.round_corner_ex
+                                              : m_style.round_corner);
 
-  COLORREF shadow_color = m_style.shadow_color;
+  COLORREF shadow_color = m_style.detail_shadow_color
+                              ? m_style.detail_shadow_color
+                              : m_style.shadow_color;
   // Draw shadow if configured
   if (shadow_radius > 0 && COLORNOTTRANSPARENT(shadow_color)) {
     CRect rect(
@@ -365,7 +383,9 @@ void WeaselDetailPanel::_Render(const std::wstring& detail_text,
           ? m_style.detail_border_color
           : (m_style.candidate_border_color ? m_style.candidate_border_color
                                             : m_style.border_color);
-  int border_width = DPI_SCALE(m_style.border);
+  int border_width = m_style.detail_border_width >= 0
+                         ? DPI_SCALE(m_style.detail_border_width)
+                         : DPI_SCALE(m_style.border);
   if (border_width > 0 && COLORNOTTRANSPARENT(border_color_ref)) {
     Gdiplus::Color border_color = GDPCOLOR_FROM_COLORREF(border_color_ref);
     Gdiplus::Pen pen(border_color, (Gdiplus::REAL)border_width);
@@ -389,13 +409,17 @@ void WeaselDetailPanel::_Render(const std::wstring& detail_text,
     if (m_pRenderTarget) {
       RECT rcBind = {0, 0, win_width, win_height};
       if (SUCCEEDED(m_pRenderTarget->BindDC(hMemDC, &rcBind))) {
-        const std::wstring font_face = m_style.comment_font_face.empty()
-                                           ? m_style.font_face
-                                           : m_style.comment_font_face;
+        const std::wstring font_face = !m_style.detail_font_face.empty()
+                                           ? m_style.detail_font_face
+                                           : (m_style.comment_font_face.empty()
+                                                  ? m_style.font_face
+                                                  : m_style.comment_font_face);
         int font_point =
-            m_style.comment_font_point > 0
-                ? m_style.comment_font_point
-                : (m_style.font_point > 0 ? m_style.font_point : 12);
+            m_style.detail_font_point > 0
+                ? m_style.detail_font_point
+                : (m_style.comment_font_point > 0
+                       ? m_style.comment_font_point
+                       : (m_style.font_point > 0 ? m_style.font_point : 12));
 
         ComPtr<IDWriteTextFormat> pTextFormat;
         pdwr->pDWFactory->CreateTextFormat(
@@ -408,6 +432,14 @@ void WeaselDetailPanel::_Render(const std::wstring& detail_text,
           pTextFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
           pTextFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
           pTextFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+
+          if (m_style.detail_linespacing > 0) {
+            float linespacing = m_dpiScaleFontPoint *
+                                ((float)m_style.detail_linespacing / 100.0f);
+            pTextFormat->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
+                                        font_point * linespacing,
+                                        font_point * linespacing * 0.8f);
+          }
 
           float max_text_width = (float)max(20, content_width - 2 * padding_x);
           float max_text_height = (float)content_height;
