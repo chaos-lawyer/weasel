@@ -41,6 +41,7 @@ if ($h -or $help -eq "--help") {
   exit
 }
 function SafeExit {
+  param ( [int]$code = 0 )
   function SafeDelVars {
     param ( $vars)
     $vars | ForEach-Object {
@@ -51,7 +52,7 @@ function SafeExit {
     }
   }
   SafeDelVars @("authorization", "proxy_", "api_pat", "url_pat", "url_replace")
-  exit
+  exit $code
 }
 # set $os if $os not provide
 if (!$os) {
@@ -64,7 +65,7 @@ if (!$os) {
 # eixt if $os is not Windows or macOS
 if (($os -ne "Windows") -and ($os -ne "macOS")) {
   Write-Host "OS $os not supported, Windows or macOS is required."
-  SafeExit
+  SafeExit 1
 }
 # set patterns
 if ($os -eq "Windows") {
@@ -105,6 +106,7 @@ $global:url_replace = "github"
 if (Test-Path "$home_dir/.get-rime.conf.ps1") { & "$home_dir/.get-rime.conf.ps1" }
 # if $api_pat not set, use the original api url, in case of conf files not exist
 if (!$api_pat) { $api_pat = "https://api.github.com/repos/rime/librime/releases/" }
+if (!$authorization -and $env:GITHUB_TOKEN) { $global:authorization = $env:GITHUB_TOKEN }
 if ($tag) {
   $apiUrl = $api_pat + "tags/$tag"
 } else {
@@ -120,7 +122,7 @@ if (($api_pat -match "^https://api.github.com.*$") -and $authorization) {
   Write-Host "⛔ Caution:
   $api_pat is not original api url
   authorization should be removed or commented for security"
-  SafeExit
+  SafeExit 1
 }
 
 if (!$proxy -and $proxy_) {
@@ -135,7 +137,7 @@ try {
   $response = Invoke-RestMethod @webRequestParams
 } catch {
   Write-Host "❌ Error Invoke-RestMethod @webRequestParams: $($_.Exception.Message)"
-  SafeExit
+  SafeExit 1
 }
 # check 7z available
 try {
@@ -156,7 +158,7 @@ try {
       $cmdOk = $true
     } catch{
       Write-Host "Error download 7z commandline tool";
-      SafeExit
+      SafeExit 1
     }
   }
 }
@@ -385,5 +387,6 @@ if ($null -ne $response.assets -and $response.assets.Count -gt 0) {
   }
 } else {
   Write-Host "❌ Error: No assets found for the latest release."
+  SafeExit 1
 }
-SafeExit
+SafeExit 0
