@@ -1866,6 +1866,8 @@ static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
                  style.detail_border_width, 0, 0, _abs);
   _RimeGetIntStr(config, "style/candidate_detail_panel/linespacing",
                  style.detail_linespacing, 0, 0, _abs);
+  _RimeGetBool(config, "style/candidate_detail_panel/draw_line_separators",
+               initialize, style.detail_draw_line_separators, false);
   // get color scheme
   const int BUF_SIZE = 255;
   char buffer[BUF_SIZE + 1] = {0};
@@ -1937,6 +1939,16 @@ static bool _UpdateUIStyleColor(RimeConfig* config,
                                        : style.border_color);
     COLOR("candidate_detail_shadow_color", style.detail_shadow_color,
           style.shadow_color);
+    COLOR("candidate_detail_line_separator_color",
+          style.detail_line_separator_color,
+          blend_colors(style.detail_border_color ? style.detail_border_color
+                                                 : style.border_color,
+                       style.detail_back_color ? style.detail_back_color
+                                               : style.back_color));
+    COLOR("candidate_detail_key_text_color", style.detail_key_text_color,
+          blend_colors(style.detail_text_color, style.detail_back_color
+                                                    ? style.detail_back_color
+                                                    : style.back_color));
 #undef COLOR
     return true;
   }

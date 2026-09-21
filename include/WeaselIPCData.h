@@ -324,6 +324,9 @@ struct UIStyle {
   int detail_corner_radius;
   int detail_border_width;
   int detail_linespacing;
+  bool detail_draw_line_separators;
+  int detail_line_separator_color;
+  int detail_key_text_color;
 
   UIStyle()
       : font_face(),
@@ -412,7 +415,10 @@ struct UIStyle {
         detail_font_point(0),
         detail_corner_radius(-1),
         detail_border_width(-1),
-        detail_linespacing(0) {}
+        detail_linespacing(0),
+        detail_draw_line_separators(false),
+        detail_line_separator_color(0),
+        detail_key_text_color(0) {}
   bool operator!=(const UIStyle& st) const {
     return (
         align_type != st.align_type || antialias_mode != st.antialias_mode ||
@@ -488,7 +494,10 @@ struct UIStyle {
         detail_font_point != st.detail_font_point ||
         detail_corner_radius != st.detail_corner_radius ||
         detail_border_width != st.detail_border_width ||
-        detail_linespacing != st.detail_linespacing);
+        detail_linespacing != st.detail_linespacing ||
+        detail_draw_line_separators != st.detail_draw_line_separators ||
+        detail_line_separator_color != st.detail_line_separator_color ||
+        detail_key_text_color != st.detail_key_text_color);
   }
   bool operator==(const UIStyle& st) const { return !(*this != st); }
 };
@@ -589,6 +598,9 @@ void serialize(Archive& ar, weasel::UIStyle& s, const unsigned int version) {
     ar & s.detail_corner_radius;
     ar & s.detail_border_width;
     ar & s.detail_linespacing;
+    ar & s.detail_draw_line_separators;
+    ar & s.detail_line_separator_color;
+    ar & s.detail_key_text_color;
   }
 }
 

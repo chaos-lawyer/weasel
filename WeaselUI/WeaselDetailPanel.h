@@ -72,6 +72,8 @@ class WeaselDetailPanel
 
   ComPtr<ID2D1DCRenderTarget> m_pRenderTarget;
   ComPtr<ID2D1SolidColorBrush> m_pBrush;
+  ComPtr<ID2D1SolidColorBrush> m_pKeyBrush;
+  ComPtr<ID2D1SolidColorBrush> m_pSeparatorBrush;
 };
 
 }  // namespace weasel

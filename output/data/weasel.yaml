@@ -78,10 +78,13 @@ style:
     # linespacing: 4       # 行间距（单位 px，默认 0）
     # corner_radius: 6     # 独立圆角半径（缺省时继承皮肤 round_corner）
     # border_width: 1      # 独立边框粗细（缺省时继承皮肤 border）
-    # text_color: 0x333333 # 独立文字颜色（也可在具体 color_scheme 中通过 candidate_detail_text_color 配置）
-    # back_color: 0xffffff # 独立背景颜色（也可在具体 color_scheme 中通过 candidate_detail_back_color 配置）
-    # border_color: 0xe0e0e0 # 独立边框颜色（也可在具体 color_scheme 中通过 candidate_detail_border_color 配置）
-    # shadow_color: 0x20000000 # 独立阴影颜色（也可在具体 color_scheme 中通过 candidate_detail_shadow_color 配置）
+    # draw_line_separators: false # 是否在多行文本之间绘制水平分割线 (true | false)
+    # text_color: 0x333333 # 独立正文文字颜色（也可在 color_scheme 中通过 candidate_detail_text_color 配置）
+    # key_text_color: 0x888888 # 独立键名文字颜色（冒号前的前缀标签，如“发布机关：”，未配置则自动柔和对比）
+    # back_color: 0xffffff # 独立背景颜色（也可在 color_scheme 中通过 candidate_detail_back_color 配置）
+    # border_color: 0xe0e0e0 # 独立边框颜色（也可在 color_scheme 中通过 candidate_detail_border_color 配置）
+    # line_separator_color: 0xeeeeee # 独立分割线颜色（未配置则自动根据边框/底色融合）
+    # shadow_color: 0x20000000 # 独立阴影颜色（也可在 color_scheme 中通过 candidate_detail_shadow_color 配置）
 
 # 动态候选布局配置（需配合 style/layout/type: auto 使用）
 # dynamic_layout:

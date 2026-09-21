@@ -48,6 +48,8 @@ LRESULT WeaselDetailPanel::OnDestroy(UINT uMsg,
                                      BOOL& bHandled) {
   m_pRenderTarget.Reset();
   m_pBrush.Reset();
+  m_pKeyBrush.Reset();
+  m_pSeparatorBrush.Reset();
   return 0;
 }
 
@@ -496,7 +498,113 @@ void WeaselDetailPanel::_Render(const std::wstring& detail_text,
               m_pBrush->SetColor(D2D1::ColorF(r, g, b, alpha));
             }
 
+            // Key brush (for label before colon like "发布机关：", softer
+            // contrast)
+            COLORREF key_color_ref = m_style.detail_key_text_color
+                                         ? m_style.detail_key_text_color
+                                         : text_color_ref;
+            float kr = (float)GetRValue(key_color_ref) / 255.0f;
+            float kg = (float)GetGValue(key_color_ref) / 255.0f;
+            float kb = (float)GetBValue(key_color_ref) / 255.0f;
+            float kalpha = (float)((key_color_ref >> 24) & 255) / 255.0f;
+            if (kalpha <= 0.0f) {
+              // If not explicitly set with alpha, give a refined secondary
+              // opacity 0.72
+              kalpha = m_style.detail_key_text_color ? 1.0f : 0.72f;
+            }
+            if (!m_pKeyBrush) {
+              m_pRenderTarget->CreateSolidColorBrush(
+                  D2D1::ColorF(kr, kg, kb, kalpha),
+                  m_pKeyBrush.ReleaseAndGetAddressOf());
+            } else {
+              m_pKeyBrush->SetColor(D2D1::ColorF(kr, kg, kb, kalpha));
+            }
+
+            // Separator line brush
+            COLORREF sep_color_ref =
+                m_style.detail_line_separator_color
+                    ? m_style.detail_line_separator_color
+                    : (m_style.detail_border_color
+                           ? m_style.detail_border_color
+                           : (m_style.candidate_border_color
+                                  ? m_style.candidate_border_color
+                                  : m_style.border_color));
+            float sr = (float)GetRValue(sep_color_ref) / 255.0f;
+            float sg = (float)GetGValue(sep_color_ref) / 255.0f;
+            float sb = (float)GetBValue(sep_color_ref) / 255.0f;
+            float salpha = (float)((sep_color_ref >> 24) & 255) / 255.0f;
+            if (salpha <= 0.0f) {
+              salpha = 0.35f;  // Subtle elegant line
+            }
+            if (!m_pSeparatorBrush) {
+              m_pRenderTarget->CreateSolidColorBrush(
+                  D2D1::ColorF(sr, sg, sb, salpha),
+                  m_pSeparatorBrush.ReleaseAndGetAddressOf());
+            } else {
+              m_pSeparatorBrush->SetColor(D2D1::ColorF(sr, sg, sb, salpha));
+            }
+
+            // Scan lines to apply rich typography:
+            // 1. Key label (before ':' or '：') uses m_pKeyBrush and
+            // normal/medium weight
+            // 2. Value (after colon) uses main text brush and semi-bold weight
+            size_t line_start = 0;
+            while (line_start < detail_text.length()) {
+              size_t line_end = detail_text.find(L'\n', line_start);
+              if (line_end == std::wstring::npos) {
+                line_end = detail_text.length();
+              }
+              std::wstring line =
+                  detail_text.substr(line_start, line_end - line_start);
+
+              size_t colon_pos = line.find(L'：');
+              if (colon_pos == std::wstring::npos) {
+                colon_pos = line.find(L':');
+              }
+
+              if (colon_pos != std::wstring::npos && colon_pos > 0) {
+                // Key part
+                DWRITE_TEXT_RANGE key_range = {(UINT32)line_start,
+                                               (UINT32)(colon_pos + 1)};
+                pTextLayout->SetDrawingEffect(m_pKeyBrush.Get(), key_range);
+
+                // Value part
+                if (colon_pos + 1 < line.length()) {
+                  DWRITE_TEXT_RANGE val_range = {
+                      (UINT32)(line_start + colon_pos + 1),
+                      (UINT32)(line.length() - colon_pos - 1)};
+                  pTextLayout->SetFontWeight(DWRITE_FONT_WEIGHT_MEDIUM,
+                                             val_range);
+                }
+              }
+
+              line_start = line_end + 1;
+            }
+
             m_pRenderTarget->BeginDraw();
+
+            // Draw line dividers between lines if enabled
+            if (m_style.detail_draw_line_separators) {
+              UINT32 totalLineCount = 0;
+              pTextLayout->GetLineMetrics(nullptr, 0, &totalLineCount);
+              if (totalLineCount > 1) {
+                std::vector<DWRITE_LINE_METRICS> lm(totalLineCount);
+                pTextLayout->GetLineMetrics(lm.data(), totalLineCount,
+                                            &totalLineCount);
+                float curY = (float)(blurMarginY + padding_y);
+                float lineLeft = (float)(blurMarginX + padding_x);
+                float lineRight = lineLeft + max_text_width;
+
+                for (UINT32 i = 0; i < totalLineCount - 1; ++i) {
+                  curY += lm[i].height;
+                  // Draw subtle horizontal separator between lines
+                  m_pRenderTarget->DrawLine(D2D1::Point2F(lineLeft, curY),
+                                            D2D1::Point2F(lineRight, curY),
+                                            m_pSeparatorBrush.Get(), 1.0f);
+                }
+              }
+            }
+
             m_pRenderTarget->DrawTextLayout(
                 D2D1::Point2F((float)(blurMarginX + padding_x),
                               (float)(blurMarginY + padding_y)),
