@@ -82,13 +82,13 @@ inline DetailPanelRect CalculateDetailPanelPosition(
 
   // Bound to work area dimensions
   if (detail_width > work_area_rect.width()) {
-    detail_width = std::max(0, work_area_rect.width());
+    detail_width = (std::max)(0, work_area_rect.width());
   }
   if (detail_height > work_area_rect.height()) {
-    detail_height = std::max(0, work_area_rect.height());
+    detail_height = (std::max)(0, work_area_rect.height());
   }
 
-  int gap = std::max(0, config.gap);
+  int gap = (std::max)(0, config.gap);
   int x = candidate_window_rect.right + gap;
   int y = candidate_window_rect.top;
 

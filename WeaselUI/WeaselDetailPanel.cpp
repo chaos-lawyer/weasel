@@ -1,9 +1,21 @@
 #include "stdafx.h"
 #include "WeaselDetailPanel.h"
+#include "Layout.h"
+#include "GdiplusBlur.h"
 #include <ShellScalingAPI.h>
 #include <cmath>
 
 #pragma comment(lib, "Shcore.lib")
+
+#ifndef COLORNOTTRANSPARENT
+#define COLORNOTTRANSPARENT(color) ((color & 0xff000000) != 0)
+#endif
+
+#ifndef GDPCOLOR_FROM_COLORREF
+#define GDPCOLOR_FROM_COLORREF(color)                                  \
+  Gdiplus::Color(GetAValue(color), GetRValue(color), GetGValue(color), \
+                 GetBValue(color))
+#endif
 
 using namespace weasel;
 
