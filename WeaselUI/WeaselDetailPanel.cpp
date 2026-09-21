@@ -179,6 +179,9 @@ void WeaselDetailPanel::Update(const std::wstring& detail_text,
     return;
   }
 
+  const ParsedDetailPanelText parsed_detail = ParseDetailPanelText(detail_text);
+  const std::wstring& display_text = parsed_detail.text;
+
   // Font setup
   const std::wstring font_face =
       !m_style.detail_font_face.empty()
@@ -225,14 +228,14 @@ void WeaselDetailPanel::Update(const std::wstring& detail_text,
 
   ComPtr<IDWriteTextLayout> pTextLayout;
   HR(pdwr->pDWFactory->CreateTextLayout(
-      detail_text.c_str(), (UINT32)detail_text.length(), pTextFormat.Get(),
+      display_text.c_str(), (UINT32)display_text.length(), pTextFormat.Get(),
       max_layout_width, 10000.0f, pTextLayout.ReleaseAndGetAddressOf()));
 
   if (!pTextLayout) {
     return;
   }
 
-  ApplyConfiguredFonts(pTextLayout.Get(), detail_text, m_style);
+  ApplyConfiguredFonts(pTextLayout.Get(), display_text, m_style);
 
   DWRITE_TEXT_METRICS metrics;
   HR(pTextLayout->GetMetrics(&metrics));
@@ -302,8 +305,8 @@ void WeaselDetailPanel::Update(const std::wstring& detail_text,
   m_last_candidate_index = candidate_index;
   m_last_candidate_rect = rcCandidate;
 
-  _Render(detail_text, pos, content_width, content_height, padding_x, padding_y,
-          pdwr);
+  _Render(parsed_detail, pos, content_width, content_height, padding_x,
+          padding_y, pdwr);
 
   Show();
 }
@@ -350,7 +353,7 @@ void WeaselDetailPanel::Reposition(const CRect& rcCandidate) {
                SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOREDRAW);
 }
 
-void WeaselDetailPanel::_Render(const std::wstring& detail_text,
+void WeaselDetailPanel::_Render(const ParsedDetailPanelText& parsed_detail,
                                 const DetailPanelRect& pos,
                                 int content_width,
                                 int content_height,
@@ -360,6 +363,8 @@ void WeaselDetailPanel::_Render(const std::wstring& detail_text,
   if (!IsWindow()) {
     return;
   }
+
+  const std::wstring& detail_text = parsed_detail.text;
 
   int shadow_radius = DPI_SCALE(m_style.shadow_radius);
   int blurMarginX = shadow_radius;
@@ -638,6 +643,25 @@ void WeaselDetailPanel::_Render(const std::wstring& detail_text,
               }
 
               line_start = line_end + 1;
+            }
+
+            // Markdown-style **text** uses the configured accent color. The
+            // markers have already been removed before layout and rendering.
+            for (const auto& range : parsed_detail.emphasis_ranges) {
+              if (range.start >= detail_text.length()) {
+                continue;
+              }
+              const size_t safe_length =
+                  (std::min)(range.length, detail_text.length() - range.start);
+              if (safe_length == 0) {
+                continue;
+              }
+              const DWRITE_TEXT_RANGE emphasis_range = {
+                  static_cast<UINT32>(range.start),
+                  static_cast<UINT32>(safe_length)};
+              pTextLayout->SetDrawingEffect(m_pKeyBrush.Get(), emphasis_range);
+              pTextLayout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD,
+                                         emphasis_range);
             }
 
             m_pRenderTarget->BeginDraw();

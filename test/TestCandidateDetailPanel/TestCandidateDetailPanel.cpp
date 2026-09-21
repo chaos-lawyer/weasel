@@ -177,6 +177,29 @@ void test_auto_position_resolution() {
                  DetailPanelPosition::Auto)) == "auto");
 }
 
+void test_detail_emphasis_markup() {
+  ParsedDetailPanelText parsed =
+      ParseDetailPanelText(L"状态：**重点客户**，等级：**A 类**");
+  BOOST_TEST(parsed.text == L"状态：重点客户，等级：A 类");
+  BOOST_TEST_EQ(parsed.emphasis_ranges.size(), 2u);
+  BOOST_TEST_EQ(parsed.emphasis_ranges[0].start, 3u);
+  BOOST_TEST_EQ(parsed.emphasis_ranges[0].length, 4u);
+  BOOST_TEST_EQ(parsed.emphasis_ranges[1].start, 11u);
+  BOOST_TEST_EQ(parsed.emphasis_ranges[1].length, 3u);
+
+  parsed = ParseDetailPanelText(L"字面量：\\**不是强调**");
+  BOOST_TEST(parsed.text == L"字面量：**不是强调**");
+  BOOST_TEST(parsed.emphasis_ranges.empty());
+
+  parsed = ParseDetailPanelText(L"异常：**未闭合");
+  BOOST_TEST(parsed.text == L"异常：**未闭合");
+  BOOST_TEST(parsed.emphasis_ranges.empty());
+
+  parsed = ParseDetailPanelText(L"空标记：****");
+  BOOST_TEST(parsed.text == L"空标记：****");
+  BOOST_TEST(parsed.emphasis_ranges.empty());
+}
+
 // 7. CandidateInfo 数据结构与 equality 测试
 void test_candidate_info_detail() {
   CandidateInfo ci1;
@@ -254,6 +277,7 @@ int main() {
   test_position_left_preference_and_flip();
   test_min_max_width_constraint();
   test_auto_position_resolution();
+  test_detail_emphasis_markup();
   test_candidate_info_detail();
   test_ui_style_defaults();
 

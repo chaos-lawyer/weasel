@@ -50,7 +50,7 @@ class WeaselDetailPanel
   }
 
   void _UpdateDpi(const CRect& rcCandidate);
-  void _Render(const std::wstring& detail_text,
+  void _Render(const ParsedDetailPanelText& parsed_detail,
                const DetailPanelRect& pos,
                int content_width,
                int content_height,

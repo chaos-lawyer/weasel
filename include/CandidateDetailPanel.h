@@ -44,6 +44,57 @@ struct DetailPanelGeometryConfig {
   int padding_y = 10;
 };
 
+struct DetailPanelTextRange {
+  size_t start = 0;
+  size_t length = 0;
+
+  bool operator==(const DetailPanelTextRange& other) const {
+    return start == other.start && length == other.length;
+  }
+};
+
+struct ParsedDetailPanelText {
+  std::wstring text;
+  std::vector<DetailPanelTextRange> emphasis_ranges;
+};
+
+/**
+ * Parse the lightweight detail-panel markup. Paired Markdown-style ** markers
+ * are removed and the enclosed text is returned as an emphasis range.
+ * Unpaired or empty markers remain visible, so malformed user dictionary
+ * entries do not silently lose content. A backslash escapes a following **.
+ */
+inline ParsedDetailPanelText ParseDetailPanelText(const std::wstring& source) {
+  ParsedDetailPanelText result;
+  size_t cursor = 0;
+
+  while (cursor < source.length()) {
+    if (source[cursor] == L'\\' && cursor + 2 < source.length() &&
+        source.compare(cursor + 1, 2, L"**") == 0) {
+      result.text.append(L"**");
+      cursor += 3;
+      continue;
+    }
+
+    if (cursor + 1 < source.length() && source.compare(cursor, 2, L"**") == 0) {
+      const size_t closing = source.find(L"**", cursor + 2);
+      if (closing != std::wstring::npos && closing > cursor + 2) {
+        const size_t range_start = result.text.length();
+        result.text.append(source, cursor + 2, closing - cursor - 2);
+        result.emphasis_ranges.push_back(
+            {range_start, result.text.length() - range_start});
+        cursor = closing + 2;
+        continue;
+      }
+    }
+
+    result.text.push_back(source[cursor]);
+    ++cursor;
+  }
+
+  return result;
+}
+
 inline DetailPanelPosition ParseDetailPanelPosition(const std::string& pos) {
   if (pos == "left")
     return DetailPanelPosition::Left;
