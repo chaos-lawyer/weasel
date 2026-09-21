@@ -19,6 +19,12 @@
 
 using namespace weasel;
 
+namespace {
+
+constexpr wchar_t kDetailNumberFontFace[] = L"Cascadia Mono";
+
+}  // namespace
+
 WeaselDetailPanel::WeaselDetailPanel(weasel::UI& ui)
     : m_style(ui.style()),
       m_last_candidate_index(-1),
@@ -574,6 +580,25 @@ void WeaselDetailPanel::_Render(const std::wstring& detail_text,
                       (UINT32)(line.length() - colon_pos - 1)};
                   pTextLayout->SetFontWeight(DWRITE_FONT_WEIGHT_MEDIUM,
                                              val_range);
+                }
+              }
+
+              // Dates, document numbers and other Latin digits are easier to
+              // scan when they use a restrained monospaced face. DirectWrite
+              // falls back gracefully if Cascadia Mono is unavailable.
+              size_t digit_start = std::wstring::npos;
+              for (size_t i = 0; i <= line.length(); ++i) {
+                const bool is_digit =
+                    i < line.length() && line[i] >= L'0' && line[i] <= L'9';
+                if (is_digit && digit_start == std::wstring::npos) {
+                  digit_start = i;
+                } else if (!is_digit && digit_start != std::wstring::npos) {
+                  const DWRITE_TEXT_RANGE digit_range = {
+                      static_cast<UINT32>(line_start + digit_start),
+                      static_cast<UINT32>(i - digit_start)};
+                  pTextLayout->SetFontFamilyName(kDetailNumberFontFace,
+                                                 digit_range);
+                  digit_start = std::wstring::npos;
                 }
               }
 
