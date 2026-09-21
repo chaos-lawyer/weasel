@@ -7,7 +7,13 @@
 
 namespace weasel {
 
-enum class DetailPanelPosition { Right = 0, Left = 1, Top = 2, Bottom = 3 };
+enum class DetailPanelPosition {
+  Right = 0,
+  Left = 1,
+  Top = 2,
+  Bottom = 3,
+  Auto = 4
+};
 
 struct DetailPanelRect {
   int left = 0;
@@ -45,7 +51,18 @@ inline DetailPanelPosition ParseDetailPanelPosition(const std::string& pos) {
     return DetailPanelPosition::Top;
   if (pos == "bottom")
     return DetailPanelPosition::Bottom;
+  if (pos == "auto")
+    return DetailPanelPosition::Auto;
   return DetailPanelPosition::Right;
+}
+
+inline DetailPanelPosition ResolveDetailPanelPosition(
+    DetailPanelPosition preferred_position,
+    bool is_vertical_layout) {
+  if (preferred_position != DetailPanelPosition::Auto)
+    return preferred_position;
+  return is_vertical_layout ? DetailPanelPosition::Right
+                            : DetailPanelPosition::Bottom;
 }
 
 inline const char* DetailPanelPositionToString(DetailPanelPosition pos) {
@@ -56,6 +73,8 @@ inline const char* DetailPanelPositionToString(DetailPanelPosition pos) {
       return "top";
     case DetailPanelPosition::Bottom:
       return "bottom";
+    case DetailPanelPosition::Auto:
+      return "auto";
     case DetailPanelPosition::Right:
     default:
       return "right";

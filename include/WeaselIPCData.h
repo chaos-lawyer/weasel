@@ -225,7 +225,8 @@ struct UIStyle {
     DETAIL_POS_RIGHT = 0,
     DETAIL_POS_LEFT = 1,
     DETAIL_POS_TOP = 2,
-    DETAIL_POS_BOTTOM = 3
+    DETAIL_POS_BOTTOM = 3,
+    DETAIL_POS_AUTO = 4
   };
 
   // font face and font point settings

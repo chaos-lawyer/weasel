@@ -1890,11 +1890,12 @@ static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
   // get candidate_detail_panel
   _RimeGetBool(config, "style/candidate_detail_panel/enabled", initialize,
                style.detail_enabled);
-  static constexpr Array<UIStyle::DetailPosition, 4> _detailPosArr = {
+  static constexpr Array<UIStyle::DetailPosition, 5> _detailPosArr = {
       {{"right", UIStyle::DETAIL_POS_RIGHT},
        {"left", UIStyle::DETAIL_POS_LEFT},
        {"top", UIStyle::DETAIL_POS_TOP},
-       {"bottom", UIStyle::DETAIL_POS_BOTTOM}}};
+       {"bottom", UIStyle::DETAIL_POS_BOTTOM},
+       {"auto", UIStyle::DETAIL_POS_AUTO}}};
   _RimeParseStringOptWithFallback(
       config, "style/candidate_detail_panel/position", style.detail_position,
       _detailPosArr, style.detail_position);

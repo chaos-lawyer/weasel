@@ -21,6 +21,18 @@ using namespace weasel;
 
 namespace {
 
+bool IsVerticalCandidateLayout(UIStyle::LayoutType layout_type) {
+  return layout_type == UIStyle::LAYOUT_VERTICAL ||
+         layout_type == UIStyle::LAYOUT_VERTICAL_FULLSCREEN ||
+         layout_type == UIStyle::LAYOUT_VERTICAL_TEXT;
+}
+
+DetailPanelPosition ResolveConfiguredPosition(const UIStyle& style) {
+  return ResolveDetailPanelPosition(
+      static_cast<DetailPanelPosition>(style.detail_position),
+      IsVerticalCandidateLayout(style.layout_type));
+}
+
 bool IsHanCharacter(wchar_t character) {
   return (character >= 0x3400 && character <= 0x4DBF) ||
          (character >= 0x4E00 && character <= 0x9FFF) ||
@@ -272,8 +284,7 @@ void WeaselDetailPanel::Update(const std::wstring& detail_text,
                                rcWork.bottom};
 
   DetailPanelGeometryConfig geom_config;
-  geom_config.preferred_position =
-      static_cast<DetailPanelPosition>(m_style.detail_position);
+  geom_config.preferred_position = ResolveConfiguredPosition(m_style);
   geom_config.gap = DPI_SCALE(m_style.detail_gap > 0 ? m_style.detail_gap : 8);
   geom_config.min_width = DPI_SCALE(m_style.detail_min_width);
   geom_config.max_width = DPI_SCALE(m_style.detail_max_width);
@@ -317,8 +328,7 @@ void WeaselDetailPanel::Reposition(const CRect& rcCandidate) {
                                rcWork.bottom};
 
   DetailPanelGeometryConfig geom_config;
-  geom_config.preferred_position =
-      static_cast<DetailPanelPosition>(m_style.detail_position);
+  geom_config.preferred_position = ResolveConfiguredPosition(m_style);
   geom_config.gap = DPI_SCALE(m_style.detail_gap > 0 ? m_style.detail_gap : 8);
   geom_config.min_width = DPI_SCALE(m_style.detail_min_width);
   geom_config.max_width = DPI_SCALE(m_style.detail_max_width);

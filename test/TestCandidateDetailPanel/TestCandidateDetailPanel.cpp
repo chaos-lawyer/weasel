@@ -165,6 +165,18 @@ void test_min_max_width_constraint() {
   BOOST_TEST_EQ(pos2.width(), 400);
 }
 
+void test_auto_position_resolution() {
+  BOOST_TEST(ParseDetailPanelPosition("auto") == DetailPanelPosition::Auto);
+  BOOST_TEST(ResolveDetailPanelPosition(DetailPanelPosition::Auto, false) ==
+             DetailPanelPosition::Bottom);
+  BOOST_TEST(ResolveDetailPanelPosition(DetailPanelPosition::Auto, true) ==
+             DetailPanelPosition::Right);
+  BOOST_TEST(ResolveDetailPanelPosition(DetailPanelPosition::Top, false) ==
+             DetailPanelPosition::Top);
+  BOOST_TEST(std::string(DetailPanelPositionToString(
+                 DetailPanelPosition::Auto)) == "auto");
+}
+
 // 7. CandidateInfo 数据结构与 equality 测试
 void test_candidate_info_detail() {
   CandidateInfo ci1;
@@ -241,6 +253,7 @@ int main() {
   test_position_bottom_overflow_clamp();
   test_position_left_preference_and_flip();
   test_min_max_width_constraint();
+  test_auto_position_resolution();
   test_candidate_info_detail();
   test_ui_style_defaults();
 
