@@ -27,17 +27,17 @@ ICONS = {
 
 # SVG text anchoring centers a font's advance box, not the visible glyph. These
 # positions compensate for each glyph's real ink bounds after rasterization.
-GLYPH_POSITIONS = {
-    "中": (128.5, 124.0),
-    "A": (129.0, 129.0),
-    "全": (129.0, 125.5),
-    "半": (128.5, 123.5),
+GLYPH_LAYOUT = {
+    "中": (128.5, 122.5, 164),
+    "A": (129.0, 129.0, 196),
+    "全": (129.0, 125.0, 164),
+    "半": (128.5, 122.0, 164),
 }
 
 
 def svg_for(style: str, glyph: str, active: bool) -> str:
     accent = BLUE if active else CHARCOAL
-    glyph_x, glyph_y = GLYPH_POSITIONS[glyph]
+    glyph_x, glyph_y, glyph_size = GLYPH_LAYOUT[glyph]
     common = (
         '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" '
         'viewBox="0 0 256 256">'
@@ -46,13 +46,13 @@ def svg_for(style: str, glyph: str, active: bool) -> str:
         f'<text x="{glyph_x}" y="{glyph_y}" text-anchor="middle" '
         'dominant-baseline="middle" '
         'font-family="Segoe UI, Microsoft YaHei UI, Microsoft YaHei, Arial, sans-serif" '
-        f'font-size="128" font-weight="700" fill="{{fill}}">{glyph}</text>'
+        f'font-size="{glyph_size}" font-weight="700" fill="{{fill}}">{glyph}</text>'
     )
 
     if style == "outline":
         body = (
             '<rect x="18" y="18" width="220" height="220" rx="48" fill="#FFFFFF" '
-            f'stroke="{BORDER}" stroke-width="10"/>'
+            f'stroke="{BORDER}" stroke-width="8"/>'
             f'<path d="M66 31H190" stroke="{accent}" stroke-width="14" '
             'stroke-linecap="round"/>'
             + text.format(fill=accent)
@@ -69,7 +69,7 @@ def svg_for(style: str, glyph: str, active: bool) -> str:
         body = (
             f'<rect x="18" y="18" width="220" height="220" rx="56" fill="{bg}"/>'
             f'<rect x="27" y="27" width="202" height="202" rx="47" fill="none" '
-            f'stroke="{accent}" stroke-opacity="0.26" stroke-width="6"/>'
+            f'stroke="{accent}" stroke-opacity="0.26" stroke-width="5"/>'
             f'<circle cx="205" cy="51" r="13" fill="{accent}"/>'
             + text.format(fill=accent)
         )

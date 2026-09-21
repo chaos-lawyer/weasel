@@ -4,6 +4,7 @@
 #include "StandardLayout.h"
 #include "Layout.h"
 #include "GdiplusBlur.h"
+#include "WeaselDetailPanel.h"
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
@@ -65,6 +66,7 @@ class WeaselPanel
   void DoPaint(CDCHandle dc);
   bool GetIsReposition() { return m_istorepos; }
   void RedrawWindow();
+  void HideDetail() { m_detailPanel.Hide(); }
 
   static VOID CALLBACK OnTimer(_In_ HWND hwnd,
                                _In_ UINT uMsg,
@@ -85,6 +87,7 @@ class WeaselPanel
   void _CreateLayout();
   void _ResizeWindow();
   void _RepositionWindow(const bool& adj = false);
+  void _UpdateDetailPanel();
   bool _DrawPreedit(const Text& text, CDCHandle dc, const CRect& rc);
   bool _DrawPreeditBack(const Text& text, CDCHandle dc, const CRect& rc);
   bool _DrawCandidates(CDCHandle& dc, bool back = false);
@@ -150,4 +153,5 @@ class WeaselPanel
   HMONITOR m_hMonitor = NULL;
   bool m_redraw_by_monitor_change = false;
   UIStyle::LayoutType m_last_layout_type;
+  WeaselDetailPanel m_detailPanel;
 };

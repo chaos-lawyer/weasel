@@ -61,6 +61,17 @@ style:
     shadow_offset_y: 4
     linespacing: 0 # percentage of font point, 0 to disable
     baseline: 0 # percentage of font point, 0 to disable
+  # 候选详情面板配置
+  candidate_detail_panel:
+    enabled: false         # 默认关闭，设为 true 时开启详情面板能力
+    position: right        # 面板位置: right | left | top | bottom
+    gap: 8                 # 候选窗与详情面板之间的间距 (px)
+    width: 320             # 详情面板宽度 (px)
+    min_width: 220         # 最小宽度 (可选)
+    max_width: 480         # 最大宽度 (可选)
+    max_lines: 10          # 最大显示行数，超过自动截断并显示省略号 (0 为不限制)
+    padding_x: 12          # 详情面板内部水平边距
+    padding_y: 10          # 详情面板内部垂直边距
 
 # 动态候选布局配置（需配合 style/layout/type: auto 使用）
 # dynamic_layout:

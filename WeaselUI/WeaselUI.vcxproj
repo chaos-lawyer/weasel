@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|ARM">
@@ -309,6 +309,7 @@
     <ClCompile Include="VerticalLayout.cpp" />
     <ClCompile Include="VHorizontalLayout.cpp" />
     <ClCompile Include="WeaselPanel.cpp" />
+    <ClCompile Include="WeaselDetailPanel.cpp" />
     <ClCompile Include="WeaselUI.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -322,6 +323,8 @@
     <ClInclude Include="VerticalLayout.h" />
     <ClInclude Include="VHorizontalLayout.h" />
     <ClInclude Include="WeaselPanel.h" />
+    <ClInclude Include="WeaselDetailPanel.h" />
+    <ClInclude Include="..\include\CandidateDetailPanel.h" />
     <ClInclude Include="..\include\WeaselUI.h" />
   </ItemGroup>
   <ItemGroup>

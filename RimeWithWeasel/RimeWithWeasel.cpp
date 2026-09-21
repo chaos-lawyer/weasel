@@ -636,6 +636,25 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
   cinfo.highlighted = ctx.menu.highlighted_candidate_index;
   cinfo.currentPage = ctx.menu.page_no;
   cinfo.is_last_page = ctx.menu.is_last_page;
+
+  cinfo.current_detail.clear();
+  if (session_id) {
+    char detail_buf[8192] = {0};
+    if (rime_api->get_property(session_id, "candidate_detail", detail_buf,
+                               sizeof(detail_buf)) &&
+        detail_buf[0] != '\0') {
+      cinfo.current_detail.str = escape_string(u8tow(detail_buf));
+    } else if (ctx.menu.highlighted_candidate_index >= 0) {
+      std::string indexed_prop =
+          "candidate_detail_" +
+          std::to_string(ctx.menu.highlighted_candidate_index);
+      if (rime_api->get_property(session_id, indexed_prop.c_str(), detail_buf,
+                                 sizeof(detail_buf)) &&
+          detail_buf[0] != '\0') {
+        cinfo.current_detail.str = escape_string(u8tow(detail_buf));
+      }
+    }
+  }
 }
 
 void RimeWithWeaselHandler::StartMaintenance() {
@@ -1111,6 +1130,11 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
 
       auto s = ss.str();
       body.append(L"ctx.cand=").append(std::move(s)).append(L"\n");
+      if (!cinfo.current_detail.empty()) {
+        body.append(L"ctx.cand_detail=")
+            .append(cinfo.current_detail.str)
+            .append(L"\n");
+      }
     }
     rime_api->free_context(&ctx);
   }
@@ -1807,6 +1831,31 @@ static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
   // get enhanced_position
   _RimeGetBool(config, "style/enhanced_position", initialize,
                style.enhanced_position, true, false);
+  // get candidate_detail_panel
+  _RimeGetBool(config, "style/candidate_detail_panel/enabled", initialize,
+               style.detail_enabled);
+  static constexpr Array<UIStyle::DetailPosition, 4> _detailPosArr = {
+      {{"right", UIStyle::DETAIL_POS_RIGHT},
+       {"left", UIStyle::DETAIL_POS_LEFT},
+       {"top", UIStyle::DETAIL_POS_TOP},
+       {"bottom", UIStyle::DETAIL_POS_BOTTOM}}};
+  _RimeParseStringOptWithFallback(
+      config, "style/candidate_detail_panel/position", style.detail_position,
+      _detailPosArr, style.detail_position);
+  _RimeGetIntStr(config, "style/candidate_detail_panel/gap", style.detail_gap,
+                 0, 0, _abs);
+  _RimeGetIntStr(config, "style/candidate_detail_panel/width",
+                 style.detail_width, 0, 0, _abs);
+  _RimeGetIntStr(config, "style/candidate_detail_panel/min_width",
+                 style.detail_min_width, 0, 0, _abs);
+  _RimeGetIntStr(config, "style/candidate_detail_panel/max_width",
+                 style.detail_max_width, 0, 0, _abs);
+  _RimeGetIntStr(config, "style/candidate_detail_panel/max_lines",
+                 style.detail_max_lines, 0, 0, _abs);
+  _RimeGetIntStr(config, "style/candidate_detail_panel/padding_x",
+                 style.detail_padding_x, 0, 0, _abs);
+  _RimeGetIntStr(config, "style/candidate_detail_panel/padding_y",
+                 style.detail_padding_y, 0, 0, _abs);
   // get color scheme
   const int BUF_SIZE = 255;
   char buffer[BUF_SIZE + 1] = {0};
@@ -1867,6 +1916,15 @@ static bool _UpdateUIStyleColor(RimeConfig* config,
     COLOR("hilited_comment_text_color", style.hilited_comment_text_color,
           style.hilited_label_text_color);
     COLOR("hilited_mark_color", style.hilited_mark_color, 0);
+    COLOR("candidate_detail_text_color", style.detail_text_color,
+          style.comment_text_color ? style.comment_text_color
+                                   : style.candidate_text_color);
+    COLOR("candidate_detail_back_color", style.detail_back_color,
+          style.candidate_back_color ? style.candidate_back_color
+                                     : style.back_color);
+    COLOR("candidate_detail_border_color", style.detail_border_color,
+          style.candidate_border_color ? style.candidate_border_color
+                                       : style.border_color);
 #undef COLOR
     return true;
   }

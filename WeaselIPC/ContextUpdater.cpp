@@ -37,6 +37,12 @@ void ContextUpdater::Store(Deserializer::KeyType const& k,
     _StoreCand(k, value);
     return;
   }
+
+  if (k[1] == L"detail" || k[1] == L"cand_detail") {
+    m_pTarget->p_context->cinfo.current_detail.clear();
+    m_pTarget->p_context->cinfo.current_detail.str = unescape_string(value);
+    return;
+  }
 }
 
 void ContextUpdater::_StoreText(Text& target,
@@ -81,6 +87,7 @@ void ContextUpdater::_StoreCand(Deserializer::KeyType k,
     lalel.str = unescape_string(lalel.str);
   for (auto& comment : cinfo.comments)
     comment.str = unescape_string(comment.str);
+  cinfo.current_detail.str = unescape_string(cinfo.current_detail.str);
 }
 
 // StatusUpdater

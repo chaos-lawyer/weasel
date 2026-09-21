@@ -5,6 +5,7 @@
 #if __has_include(<boost/serialization/vector.hpp>)
 #include <boost/serialization/vector.hpp>
 #include <boost/serialization/string.hpp>
+#include <boost/serialization/version.hpp>
 #define WEASEL_HAS_BOOST_SERIALIZATION 1
 #endif
 
@@ -84,22 +85,24 @@ struct CandidateInfo {
     highlighted = 0;
     is_last_page = false;
     candies.clear();
+    comments.clear();
     labels.clear();
+    current_detail.clear();
   }
   bool empty() const { return candies.empty(); }
   bool operator==(const CandidateInfo& ci) {
     if (currentPage != ci.currentPage || totalPages != ci.totalPages ||
         highlighted != ci.highlighted || is_last_page != ci.is_last_page ||
-        notequal(candies, ci.candies) || notequal(comments, ci.comments) ||
-        notequal(labels, ci.labels))
+        current_detail != ci.current_detail || notequal(candies, ci.candies) ||
+        notequal(comments, ci.comments) || notequal(labels, ci.labels))
       return false;
     return true;
   }
   bool operator!=(const CandidateInfo& ci) {
     if (currentPage != ci.currentPage || totalPages != ci.totalPages ||
         highlighted != ci.highlighted || is_last_page != ci.is_last_page ||
-        notequal(candies, ci.candies) || notequal(comments, ci.comments) ||
-        notequal(labels, ci.labels))
+        current_detail != ci.current_detail || notequal(candies, ci.candies) ||
+        notequal(comments, ci.comments) || notequal(labels, ci.labels))
       return true;
     return false;
   }
@@ -119,6 +122,7 @@ struct CandidateInfo {
   std::vector<Text> candies;
   std::vector<Text> comments;
   std::vector<Text> labels;
+  Text current_detail;
 };
 
 struct Context {
@@ -217,6 +221,12 @@ struct UIStyle {
   };
 
   enum LayoutAlignType { ALIGN_BOTTOM = 0, ALIGN_CENTER, ALIGN_TOP };
+  enum DetailPosition {
+    DETAIL_POS_RIGHT = 0,
+    DETAIL_POS_LEFT = 1,
+    DETAIL_POS_TOP = 2,
+    DETAIL_POS_BOTTOM = 3
+  };
 
   // font face and font point settings
   std::wstring font_face;
@@ -295,6 +305,19 @@ struct UIStyle {
   int client_caps;
   int baseline;
   int linespacing;
+  // candidate detail panel
+  bool detail_enabled;
+  DetailPosition detail_position;
+  int detail_gap;
+  int detail_width;
+  int detail_min_width;
+  int detail_max_width;
+  int detail_max_lines;
+  int detail_padding_x;
+  int detail_padding_y;
+  int detail_text_color;
+  int detail_back_color;
+  int detail_border_color;
 
   UIStyle()
       : font_face(),
@@ -365,8 +388,20 @@ struct UIStyle {
         nextpage_color(0),
         baseline(0),
         linespacing(0),
-        client_caps(0) {}
-  bool operator!=(const UIStyle& st) {
+        client_caps(0),
+        detail_enabled(false),
+        detail_position(DETAIL_POS_RIGHT),
+        detail_gap(8),
+        detail_width(320),
+        detail_min_width(0),
+        detail_max_width(0),
+        detail_max_lines(0),
+        detail_padding_x(12),
+        detail_padding_y(10),
+        detail_text_color(0),
+        detail_back_color(0),
+        detail_border_color(0) {}
+  bool operator!=(const UIStyle& st) const {
     return (
         align_type != st.align_type || antialias_mode != st.antialias_mode ||
         preedit_type != st.preedit_type || layout_type != st.layout_type ||
@@ -424,8 +459,20 @@ struct UIStyle {
         hilited_comment_text_color != st.hilited_comment_text_color ||
         hilited_mark_color != st.hilited_mark_color ||
         prevpage_color != st.prevpage_color ||
-        nextpage_color != st.nextpage_color);
+        nextpage_color != st.nextpage_color ||
+        detail_enabled != st.detail_enabled ||
+        detail_position != st.detail_position || detail_gap != st.detail_gap ||
+        detail_width != st.detail_width ||
+        detail_min_width != st.detail_min_width ||
+        detail_max_width != st.detail_max_width ||
+        detail_max_lines != st.detail_max_lines ||
+        detail_padding_x != st.detail_padding_x ||
+        detail_padding_y != st.detail_padding_y ||
+        detail_text_color != st.detail_text_color ||
+        detail_back_color != st.detail_back_color ||
+        detail_border_color != st.detail_border_color);
   }
+  bool operator==(const UIStyle& st) const { return !(*this != st); }
 };
 }  // namespace weasel
 #ifdef WEASEL_HAS_BOOST_SERIALIZATION
@@ -505,6 +552,20 @@ void serialize(Archive& ar, weasel::UIStyle& s, const unsigned int version) {
   ar & s.client_caps;
   ar & s.baseline;
   ar & s.linespacing;
+  if (version >= 1) {
+    ar & s.detail_enabled;
+    ar & s.detail_position;
+    ar & s.detail_gap;
+    ar & s.detail_width;
+    ar & s.detail_min_width;
+    ar & s.detail_max_width;
+    ar & s.detail_max_lines;
+    ar & s.detail_padding_x;
+    ar & s.detail_padding_y;
+    ar & s.detail_text_color;
+    ar & s.detail_back_color;
+    ar & s.detail_border_color;
+  }
 }
 
 template <typename Archive>
@@ -518,6 +579,9 @@ void serialize(Archive& ar,
   ar & s.candies;
   ar & s.comments;
   ar & s.labels;
+  if (version >= 1) {
+    ar & s.current_detail;
+  }
 }
 template <typename Archive>
 void serialize(Archive& ar, weasel::Text& s, const unsigned int version) {
@@ -539,4 +603,6 @@ void serialize(Archive& ar, weasel::TextRange& s, const unsigned int version) {
 }
 }  // namespace serialization
 }  // namespace boost
+BOOST_CLASS_VERSION(weasel::CandidateInfo, 1)
+BOOST_CLASS_VERSION(weasel::UIStyle, 1)
 #endif

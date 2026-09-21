@@ -68,6 +68,7 @@ WeaselPanel::WeaselPanel(weasel::UI& ui)
       pDWR(ui.pdwr()),
       _UICallback(ui.uiCallback()),
       m_last_layout_type(UIStyle::LAYOUT_TYPE_LAST),
+      m_detailPanel(ui),
       _m_gdiplusToken(0) {
   m_iconDisabled.LoadIconW(IDI_RELOAD, STATUS_ICON_SIZE, STATUS_ICON_SIZE,
                            LR_DEFAULTCOLOR);
@@ -183,7 +184,29 @@ void WeaselPanel::Refresh() {
       m_octx = m_ctx;
       RedrawWindow();
     }
+    _UpdateDetailPanel();
+  } else {
+    m_detailPanel.Hide();
   }
+}
+
+void WeaselPanel::_UpdateDetailPanel() {
+  if (!m_style.detail_enabled || hide_candidates || m_candidateCount == 0 ||
+      m_ctx.cinfo.highlighted < 0 ||
+      m_ctx.cinfo.highlighted >= (int)m_ctx.cinfo.candies.size() ||
+      m_ctx.cinfo.current_detail.empty()) {
+    m_detailPanel.Hide();
+    return;
+  }
+
+  if (!m_detailPanel.IsWindow()) {
+    m_detailPanel.Create(m_hWnd);
+  }
+
+  CRect rcCandidate;
+  GetWindowRect(&rcCandidate);
+  m_detailPanel.Update(m_ctx.cinfo.current_detail.str, m_ctx.cinfo.highlighted,
+                       rcCandidate);
 }
 
 void WeaselPanel::_InitFontRes(bool forced) {
@@ -1162,6 +1185,7 @@ LRESULT WeaselPanel::OnDestroy(UINT uMsg,
   m_hoverIndex = -1;
   m_lastMousePos = {-1, -1};
   m_sticky = false;
+  m_detailPanel.Destroy();
   delete m_layout;
   m_layout = NULL;
   return 0;
@@ -1295,6 +1319,8 @@ void WeaselPanel::_RepositionWindow(const bool& adj) {
   m_inputPos.bottom = y;
   SetWindowPos(HWND_TOPMOST, x, y, 0, 0,
                SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOREDRAW);
+  CRect rcCandidate(x, y, x + width, y + height);
+  m_detailPanel.Reposition(rcCandidate);
 }
 
 void WeaselPanel::_TextOut(const CRect& rc,

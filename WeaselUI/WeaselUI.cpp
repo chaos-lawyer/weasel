@@ -51,6 +51,7 @@ void UIImpl::Hide() {
   if (!panel.IsWindow())
     return;
   panel.ShowWindow(SW_HIDE);
+  panel.HideDetail();
   shown = false;
   if (timer) {
     KillTimer(panel.m_hWnd, AUTOHIDE_TIMER);
