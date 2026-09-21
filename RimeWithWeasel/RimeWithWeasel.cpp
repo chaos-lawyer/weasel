@@ -70,8 +70,11 @@ static DisplayPreedit _GetDisplayPreedit(RimeSessionId session_id,
 
 static int _MapDisplayPreeditPosition(int position,
                                       const DisplayPreedit& preedit) {
-  if (position <= 0 || preedit.internal_prefix_length == 0) {
-    return std::max(position, 0);
+  if (position <= 0) {
+    return 0;
+  }
+  if (preedit.internal_prefix_length == 0) {
+    return position;
   }
   if (static_cast<size_t>(position) <= preedit.internal_prefix_length) {
     return static_cast<int>(preedit.display_prefix_length);
