@@ -2,16 +2,52 @@
 #include "WeaselTSF.h"
 #include "CandidateList.h"
 #include "ResponseParser.h"
+#include <algorithm>
+#include <vector>
 
 STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
   // get commit string from server
   std::wstring commit;
   weasel::Config config;
+  weasel::LlmTriggerInfo llm_trigger;
   auto context = std::make_shared<weasel::Context>();
   weasel::ResponseParser parser(&commit, context.get(), &_status, &config,
-                                &_cand->style());
+                                &_cand->style(), &llm_trigger);
 
   bool ok = m_client.GetResponseData(std::ref(parser));
+
+  if (ok && !llm_trigger.request_id.empty()) {
+    std::wstring prefix_context;
+    if (llm_trigger.context_enabled) {
+      const LONG context_chars =
+          max(0L, min(2000L, static_cast<LONG>(llm_trigger.context_chars)));
+      const LONG search_chars = max(
+          0L, min(500L, static_cast<LONG>(llm_trigger.boundary_search_chars)));
+      std::wstring raw_context = _ReadTextBeforeCaret(
+          ec, _pEditSessionContext, context_chars + search_chars);
+      if (static_cast<LONG>(raw_context.size()) > context_chars) {
+        const size_t cut = raw_context.size() - context_chars;
+        const size_t limit = min(raw_context.size(), cut + search_chars);
+        const wchar_t* boundaries[] = {L"\r\n\r\n", L"\n\n", L"\r\n",
+                                        L"\n", L"。", L"！", L"？", L"；",
+                                        L"：", L"，"};
+        const size_t lengths[] = {4, 2, 2, 1, 1, 1, 1, 1, 1, 1};
+        size_t start = std::wstring::npos;
+        size_t skip = 0;
+        for (size_t kind = 0; kind < _countof(boundaries); ++kind) {
+          const size_t found = raw_context.find(boundaries[kind], cut);
+          if (found != std::wstring::npos && found <= limit &&
+              start == std::wstring::npos) {
+            start = found;
+            skip = lengths[kind];
+          }
+        }
+        raw_context.erase(0, start != std::wstring::npos ? start + skip : cut);
+      }
+      prefix_context = std::move(raw_context);
+    }
+    m_client.SubmitLlmContext(llm_trigger.request_id, prefix_context);
+  }
 
   _UpdateLanguageBar(_status);
 
@@ -58,4 +94,44 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
   _UpdateUI(*context, _status);
 
   return TRUE;
+}
+
+std::wstring WeaselTSF::_ReadTextBeforeCaret(TfEditCookie ec,
+                                              ITfContext* pContext,
+                                              LONG maxChars) {
+  if (!pContext || maxChars <= 0)
+    return std::wstring();
+
+  TF_SELECTION selection = {};
+  ULONG fetched = 0;
+  if (FAILED(pContext->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &selection,
+                                    &fetched)) ||
+      fetched == 0 || !selection.range) {
+    return std::wstring();
+  }
+
+  com_ptr<ITfRange> range;
+  ITfRange* cloned_range = nullptr;
+  const HRESULT clone_result = selection.range->Clone(&cloned_range);
+  selection.range->Release();
+  if (FAILED(clone_result) || !cloned_range)
+    return std::wstring();
+  range.Attach(cloned_range);
+  const TfAnchor anchor = selection.style.ase == TF_AE_START
+                              ? TF_ANCHOR_START
+                              : TF_ANCHOR_END;
+  if (FAILED(range->Collapse(ec, anchor)))
+    return std::wstring();
+
+  LONG shifted = 0;
+  if (FAILED(range->ShiftStart(ec, -maxChars, &shifted, nullptr)))
+    return std::wstring();
+
+  std::vector<WCHAR> buffer(static_cast<size_t>(maxChars) + 1, L'\0');
+  ULONG charsRead = 0;
+  if (FAILED(range->GetText(ec, 0, buffer.data(),
+                            static_cast<ULONG>(buffer.size()), &charsRead))) {
+    return std::wstring();
+  }
+  return std::wstring(buffer.data(), charsRead);
 }

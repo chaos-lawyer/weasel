@@ -2,8 +2,12 @@
 #include <WeaselIPC.h>
 #include <WeaselUI.h>
 #include <map>
+#include <memory>
 #include <string>
 #include <mutex>
+#include <thread>
+#include <atomic>
+#include <vector>
 
 #include <DynamicCandidateLayout.h>
 #include <DynamicCandidateSelectKeys.h>
@@ -30,7 +34,15 @@ struct SessionStatus {
         configured_layout_type(weasel::UIStyle::LAYOUT_VERTICAL),
         fullscreen(false),
         __synced(false),
-        session_id(0) {
+        session_id(0),
+        llm_generation(0),
+        llm_context_enabled(false),
+        llm_context_chars(500),
+        llm_boundary_search_chars(100),
+        llm_request_pending(false),
+        llm_request_submitted(false),
+        llm_ai_comment_enabled(true),
+        llm_ai_comment(L"✦ AI") {
     RIME_STRUCT(RimeStatus, status);
   }
   weasel::UIStyle style;
@@ -40,6 +52,20 @@ struct SessionStatus {
   RimeStatus status;
   bool __synced;
   RimeSessionId session_id;
+  uint64_t llm_generation;
+  std::wstring llm_request_id;
+  std::string llm_raw_input;
+  std::string llm_schema_id;
+  bool llm_context_enabled;
+  int llm_context_chars;
+  int llm_boundary_search_chars;
+  bool llm_request_pending;
+  bool llm_request_submitted;
+  bool llm_ai_comment_enabled;
+  std::wstring llm_ai_comment;
+  std::wstring llm_context;
+  std::vector<std::wstring> llm_candidates;
+  std::wstring llm_commit_text;
 };
 typedef std::map<DWORD, SessionStatus> SessionStatusMap;
 typedef DWORD WeaselSessionId;
@@ -65,6 +91,10 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   virtual bool ChangePage(bool backward, WeaselSessionId ipc_id, EatLine eat);
   virtual void FocusIn(DWORD param, WeaselSessionId ipc_id);
   virtual void FocusOut(DWORD param, WeaselSessionId ipc_id);
+  virtual void SubmitLlmContext(WeaselSessionId ipc_id,
+                               const std::wstring& request_id,
+                               const std::wstring& context);
+  virtual void RefreshSession(DWORD ipc_id);
   virtual void UpdateInputPosition(RECT const& rc, WeaselSessionId ipc_id);
   virtual void StartMaintenance();
   virtual void EndMaintenance();
@@ -74,6 +104,9 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   virtual void UpdateColorTheme(BOOL darkMode);
 
   void OnUpdateUI(std::function<void()> const& cb);
+  void SetAsyncRefresh(std::function<void(DWORD)> const& cb) {
+    _AsyncRefreshCallback = cb;
+  }
 
  private:
   void _Setup();
@@ -128,6 +161,20 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   std::map<std::string, bool> m_show_notifications;
   std::map<std::string, bool> m_show_notifications_base;
   std::function<void()> _UpdateUICallback;
+  std::function<void(DWORD)> _AsyncRefreshCallback;
+  struct LlmResult {
+    DWORD ipc_id;
+    std::wstring request_id;
+    uint64_t generation;
+    std::vector<std::wstring> candidates;
+  };
+  struct LlmWorker {
+    std::thread thread;
+    std::shared_ptr<std::atomic_bool> done;
+  };
+  std::mutex m_llm_results_mutex;
+  std::vector<LlmResult> m_llm_results;
+  std::vector<LlmWorker> m_llm_workers;
 
   static void OnNotify(void* context_object,
                        uintptr_t session_id,

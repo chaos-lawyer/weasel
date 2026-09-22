@@ -18,6 +18,9 @@
     <ClCompile Include="RimeWithWeasel.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="LlmClient.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="stdafx.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -27,6 +30,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\include\RimeWithWeasel.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="LlmClient.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\include\DynamicCandidateLayout.h">

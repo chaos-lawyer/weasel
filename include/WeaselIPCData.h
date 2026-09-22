@@ -207,6 +207,13 @@ struct Config {
   bool inline_preedit;
 };
 
+struct LlmTriggerInfo {
+  std::wstring request_id;
+  bool context_enabled = false;
+  int context_chars = 500;
+  int boundary_search_chars = 100;
+};
+
 struct UIStyle {
   enum AntiAliasMode {
     DEFAULT = 0,

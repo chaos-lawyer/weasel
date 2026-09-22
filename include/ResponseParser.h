@@ -17,12 +17,14 @@ struct ResponseParser {
   Status* p_status;
   Config* p_config;
   UIStyle* p_style;
+  LlmTriggerInfo* p_llm_trigger;
 
   ResponseParser(std::wstring* commit,
                  Context* context = 0,
                  Status* status = 0,
                  Config* config = 0,
-                 UIStyle* style = 0);
+                 UIStyle* style = 0,
+                 LlmTriggerInfo* llm_trigger = 0);
 
   // 重載函數調用運算符, 以扮做ResponseHandler
   bool operator()(LPWSTR buffer, UINT length);

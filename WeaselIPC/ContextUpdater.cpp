@@ -43,6 +43,23 @@ void ContextUpdater::Store(Deserializer::KeyType const& k,
     m_pTarget->p_context->cinfo.current_detail.str = unescape_string(value);
     return;
   }
+
+  if (k[1] == L"llm" && m_pTarget->p_llm_trigger && k.size() == 3) {
+    if (k[2] == L"request_id") {
+      m_pTarget->p_llm_trigger->request_id = unescape_string(value);
+    } else if (k[2] == L"context_enabled") {
+      m_pTarget->p_llm_trigger->context_enabled = value == L"1";
+    } else if (k[2] == L"context_chars") {
+      const int chars = _wtoi(value.c_str());
+      if (chars >= 0 && chars <= 2000)
+        m_pTarget->p_llm_trigger->context_chars = chars;
+    } else if (k[2] == L"boundary_search_chars") {
+      const int chars = _wtoi(value.c_str());
+      if (chars >= 0 && chars <= 500)
+        m_pTarget->p_llm_trigger->boundary_search_chars = chars;
+    }
+    return;
+  }
 }
 
 void ContextUpdater::_StoreText(Text& target,

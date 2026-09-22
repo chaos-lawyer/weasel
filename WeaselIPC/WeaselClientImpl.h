@@ -18,6 +18,8 @@ class ClientImpl {
   void EndMaintenance();
   bool Echo();
   bool ProcessKeyEvent(KeyEvent const& keyEvent);
+  bool SubmitLlmContext(const std::wstring& request_id,
+                        const std::wstring& context);
   bool CommitComposition();
   bool ClearComposition();
   bool SelectCandidateOnCurrentPage(size_t index);

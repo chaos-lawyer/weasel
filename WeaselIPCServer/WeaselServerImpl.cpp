@@ -6,6 +6,7 @@
 #include <WeaselUtility.h>
 
 namespace weasel {
+static std::mutex g_api_mutex;
 class PipeServer : public PipeChannel<DWORD, PipeMessage> {
  public:
   using ServerRunner = std::function<void()>;
@@ -144,6 +145,16 @@ LRESULT ServerImpl::OnServiceNotifyMessage(UINT uMsg,
   return 0;
 }
 
+LRESULT ServerImpl::OnAsyncRefresh(UINT uMsg,
+                                  WPARAM wParam,
+                                  LPARAM lParam,
+                                  BOOL& bHandled) {
+  std::lock_guard guard(g_api_mutex);
+  if (m_pRequestHandler)
+    m_pRequestHandler->RefreshSession(static_cast<DWORD>(wParam));
+  return 0;
+}
+
 DWORD ServerImpl::OnCommand(WEASEL_IPC_COMMAND uMsg,
                             DWORD wParam,
                             DWORD lParam) {
@@ -174,8 +185,6 @@ int ServerImpl::Stop() {
   PostMessage(WM_QUIT);
   return 0;
 }
-
-static std::mutex g_api_mutex;
 
 int ServerImpl::Run() {
   // This workaround causes a VC internal error:
@@ -371,6 +380,33 @@ DWORD ServerImpl::OnChangePage(WEASEL_IPC_COMMAND uMsg,
   return 0;
 }
 
+DWORD ServerImpl::OnLlmContext(WEASEL_IPC_COMMAND uMsg,
+                               DWORD wParam,
+                               DWORD lParam) {
+  if (!m_pRequestHandler)
+    return 0;
+
+  const auto* buffer =
+      reinterpret_cast<const wchar_t*>(channel->ReceiveBuffer());
+  const std::wstring body(buffer);
+  const auto read_field = [&body](const std::wstring& name) {
+    const std::wstring prefix = name + L"=";
+    const auto start = body.find(prefix);
+    if (start == std::wstring::npos)
+      return std::wstring();
+    const auto value_start = start + prefix.size();
+    const auto end = body.find(L'\n', value_start);
+    return unescape_string(body.substr(value_start, end - value_start));
+  };
+
+  const auto request_id = read_field(L"llm.request_id");
+  const auto context = read_field(L"llm.context");
+  if (request_id.empty())
+    return 0;
+  m_pRequestHandler->SubmitLlmContext(lParam, request_id, context);
+  return 1;
+}
+
 #define MAP_PIPE_MSG_HANDLE(__msg, __wParam, __lParam) \
   {                                                    \
     auto lParam = __lParam;                            \
@@ -409,6 +445,7 @@ void ServerImpl::HandlePipeMessage(PipeMessage pipe_msg, _Resp resp) {
   PIPE_MSG_HANDLE(WEASEL_IPC_HIGHLIGHT_CANDIDATE_ON_CURRENT_PAGE,
                   OnHighlightCandidateOnCurrentPage);
   PIPE_MSG_HANDLE(WEASEL_IPC_CHANGE_PAGE, OnChangePage);
+  PIPE_MSG_HANDLE(WEASEL_IPC_LLM_CONTEXT, OnLlmContext);
   PIPE_MSG_HANDLE(WEASEL_IPC_TRAY_COMMAND, OnCommand);
   END_MAP_PIPE_MSG_HANDLE(result);
 
@@ -473,6 +510,10 @@ int Server::Run() {
 
 void Server::SetRequestHandler(RequestHandler* pHandler) {
   m_pImpl->SetRequestHandler(pHandler);
+}
+
+void Server::PostRefreshSession(DWORD session_id) {
+  m_pImpl->PostRefreshSession(session_id);
 }
 
 void Server::AddMenuHandler(UINT uID, CommandHandler handler) {

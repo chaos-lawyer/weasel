@@ -118,6 +118,9 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   BOOL _ShowInlinePreedit(com_ptr<ITfContext> pContext,
                           const std::shared_ptr<weasel::Context> context);
   void _UpdateComposition(com_ptr<ITfContext> pContext);
+  std::wstring _ReadTextBeforeCaret(TfEditCookie ec,
+                                    ITfContext* pContext,
+                                    LONG maxChars);
   BOOL _IsComposing();
   BOOL _IsCurrentComposition(ITfComposition* pComposition);
   void _SetComposition(com_ptr<ITfComposition> pComposition);

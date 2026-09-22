@@ -64,6 +64,15 @@ bool ClientImpl::ProcessKeyEvent(KeyEvent const& keyEvent) {
   return ret != 0;
 }
 
+bool ClientImpl::SubmitLlmContext(const std::wstring& request_id,
+                                  const std::wstring& context) {
+  if (!_Active())
+    return false;
+  channel << L"llm.request_id=" << escape_string(request_id) << L"\n"
+          << L"llm.context=" << escape_string(context) << L"\n.\n";
+  return _SendMessage(WEASEL_IPC_LLM_CONTEXT, 0, session_id) != 0;
+}
+
 bool ClientImpl::CommitComposition() {
   if (!_Active())
     return false;
@@ -222,6 +231,11 @@ void Client::ShutdownServer() {
 
 bool Client::ProcessKeyEvent(KeyEvent const& keyEvent) {
   return m_pImpl->ProcessKeyEvent(keyEvent);
+}
+
+bool Client::SubmitLlmContext(const std::wstring& request_id,
+                              const std::wstring& context) {
+  return m_pImpl->SubmitLlmContext(request_id, context);
 }
 
 bool Client::CommitComposition() {

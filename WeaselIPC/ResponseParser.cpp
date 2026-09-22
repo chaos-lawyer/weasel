@@ -9,12 +9,14 @@ ResponseParser::ResponseParser(std::wstring* commit,
                                Context* context,
                                Status* status,
                                Config* config,
-                               UIStyle* style)
+                               UIStyle* style,
+                               LlmTriggerInfo* llm_trigger)
     : p_commit(commit),
       p_context(context),
       p_status(status),
       p_config(config),
-      p_style(style) {
+      p_style(style),
+      p_llm_trigger(llm_trigger) {
   Deserializer::Initialize(this);
 }
 

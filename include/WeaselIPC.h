@@ -32,12 +32,14 @@ enum WEASEL_IPC_COMMAND {
   WEASEL_IPC_SELECT_CANDIDATE_ON_CURRENT_PAGE,
   WEASEL_IPC_HIGHLIGHT_CANDIDATE_ON_CURRENT_PAGE,
   WEASEL_IPC_CHANGE_PAGE,
+  WEASEL_IPC_LLM_CONTEXT,
   WEASEL_IPC_LAST_COMMAND
 };
 
 // Posted by WeaselTrayIcon to the server window so that Shell_NotifyIcon runs
 // on the server message thread instead of a pipe worker thread.
 #define WM_WEASEL_SERVICE_NOTIFY (WEASEL_IPC_LAST_COMMAND + 200)
+#define WM_WEASEL_ASYNC_REFRESH (WEASEL_IPC_LAST_COMMAND + 201)
 
 namespace weasel {
 struct PipeMessage {
@@ -80,6 +82,10 @@ struct RequestHandler {
   }
   virtual void FocusIn(DWORD param, DWORD session_id) {}
   virtual void FocusOut(DWORD param, DWORD session_id) {}
+  virtual void SubmitLlmContext(DWORD session_id,
+                               const std::wstring& request_id,
+                               const std::wstring& context) {}
+  virtual void RefreshSession(DWORD session_id) {}
   virtual void UpdateInputPosition(RECT const& rc, DWORD session_id) {}
   virtual void StartMaintenance() {}
   virtual void EndMaintenance() {}
@@ -126,6 +132,8 @@ class Client {
   bool Echo();
   // 请求服务处理按键消息
   bool ProcessKeyEvent(KeyEvent const& keyEvent);
+  bool SubmitLlmContext(const std::wstring& request_id,
+                        const std::wstring& context);
   // 上屏正在編輯的文字
   bool CommitComposition();
   // 清除正在編輯的文字
@@ -164,6 +172,7 @@ class Server {
   int Run();
 
   void SetRequestHandler(RequestHandler* pHandler);
+  void PostRefreshSession(DWORD session_id);
   void AddMenuHandler(UINT uID, CommandHandler handler);
   HWND GetHWnd();
 

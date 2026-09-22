@@ -29,6 +29,7 @@ class ServerImpl : public CWindowImpl<ServerImpl, CWindow, ServerWinTraits>
   MESSAGE_HANDLER(WM_SETTINGCHANGE, OnColorChange)
   MESSAGE_HANDLER(WM_COMMAND, OnCommand)
   MESSAGE_HANDLER(WM_WEASEL_SERVICE_NOTIFY, OnServiceNotifyMessage)
+  MESSAGE_HANDLER(WM_WEASEL_ASYNC_REFRESH, OnAsyncRefresh)
   END_MSG_MAP()
 
   LRESULT OnColorChange(UINT uMsg,
@@ -51,6 +52,10 @@ class ServerImpl : public CWindowImpl<ServerImpl, CWindow, ServerWinTraits>
                                  WPARAM wParam,
                                  LPARAM lParam,
                                  BOOL& bHandled);
+  LRESULT OnAsyncRefresh(UINT uMsg,
+                         WPARAM wParam,
+                         LPARAM lParam,
+                         BOOL& bHandled);
   DWORD OnCommand(WEASEL_IPC_COMMAND uMsg, DWORD wParam, DWORD lParam);
   DWORD OnEcho(WEASEL_IPC_COMMAND uMsg, DWORD wParam, DWORD lParam);
   DWORD OnStartSession(WEASEL_IPC_COMMAND uMsg, DWORD wParam, DWORD lParam);
@@ -75,6 +80,7 @@ class ServerImpl : public CWindowImpl<ServerImpl, CWindow, ServerWinTraits>
                                           DWORD wParam,
                                           DWORD lParam);
   DWORD OnChangePage(WEASEL_IPC_COMMAND uMsg, DWORD wParam, DWORD lParam);
+  DWORD OnLlmContext(WEASEL_IPC_COMMAND uMsg, DWORD wParam, DWORD lParam);
 
  public:
   ServerImpl();
@@ -86,6 +92,10 @@ class ServerImpl : public CWindowImpl<ServerImpl, CWindow, ServerWinTraits>
 
   void SetRequestHandler(RequestHandler* pHandler) {
     m_pRequestHandler = pHandler;
+  }
+  void PostRefreshSession(DWORD session_id) {
+    if (m_hWnd)
+      PostMessage(WM_WEASEL_ASYNC_REFRESH, session_id, 0);
   }
   void AddMenuHandler(UINT uID, CommandHandler& handler) {
     m_MenuHandlers[uID] = handler;

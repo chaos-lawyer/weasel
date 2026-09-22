@@ -2,7 +2,7 @@ target("WeaselServer")
   set_kind("binary")
   add_files("./*.cpp")
   add_rules("add_rcfiles", "subwin")
-  add_links("imm32", "kernel32", "rime")
+  add_links("imm32", "kernel32", "rime", "winhttp")
   add_deps("WeaselUI", "WeaselIPC", "RimeWithWeasel", "WeaselIPCServer")
 
   add_files("$(projectdir)/PerMonitorHighDPIAware.manifest")
@@ -24,4 +24,3 @@ target("WeaselServer")
       os.cp(path.join(target:targetdir(), "WeaselServer.pdb"), "$(projectdir)/output")
     end
   end)
-
