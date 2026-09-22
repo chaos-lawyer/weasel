@@ -268,9 +268,11 @@ void WeaselDetailPanel::Update(const std::wstring& detail_text,
     pTextLayout->GetLineMetrics(lineMetrics.data(), metrics.lineCount,
                                 &actualLineCount);
     float trimmed_height = 0.0f;
-    const UINT32 visibleLineCount =
-        (std::min)(actualLineCount,
-                   static_cast<UINT32>(m_style.detail_max_lines));
+    UINT32 visibleLineCount = actualLineCount;
+    const UINT32 maxLineCount = static_cast<UINT32>(m_style.detail_max_lines);
+    if (visibleLineCount > maxLineCount) {
+      visibleLineCount = maxLineCount;
+    }
     for (UINT32 i = 0; i < visibleLineCount; ++i) {
       trimmed_height += lineMetrics[i].height;
     }
