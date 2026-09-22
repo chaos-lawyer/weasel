@@ -83,8 +83,8 @@ struct RequestHandler {
   virtual void FocusIn(DWORD param, DWORD session_id) {}
   virtual void FocusOut(DWORD param, DWORD session_id) {}
   virtual void SubmitLlmContext(DWORD session_id,
-                               const std::wstring& request_id,
-                               const std::wstring& context) {}
+                                const std::wstring& request_id,
+                                const std::wstring& context) {}
   virtual void RefreshSession(DWORD session_id) {}
   virtual void UpdateInputPosition(RECT const& rc, DWORD session_id) {}
   virtual void StartMaintenance() {}

@@ -17,8 +17,8 @@
 
 namespace weasel_llm {
 namespace {
-using CachedResult = std::pair<std::chrono::steady_clock::time_point,
-                               std::vector<std::wstring>>;
+using CachedResult =
+    std::pair<std::chrono::steady_clock::time_point, std::vector<std::wstring>>;
 std::mutex g_cache_mutex;
 std::map<std::string, CachedResult> g_cache;
 
@@ -40,7 +40,8 @@ const std::set<std::string>& Syllables() {
         "kao ke ken keng kong kou ku kua kuai kuan kuang kui kun kuo ha hai "
         "han hang hao he hei hen heng hong hou hu hua huai huan huang hui hun "
         "huo ji jia jian jiang jiao jie jin jing jiong jiu ju juan jue jun qi "
-        "qia qian qiang qiao qie qin qing qiong qiu qu quan que qun xi xia xian "
+        "qia qian qiang qiao qie qin qing qiong qiu qu quan que qun xi xia "
+        "xian "
         "xiang xiao xie xin xing xiong xiu xu xuan xue xun zha zhai zhan zhang "
         "zhao zhe zhei zhen zheng zhi zhong zhou zhu zhua zhuai zhuan zhuang "
         "zhui zhun zhuo cha chai chan chang chao che chen cheng chi chong chou "
@@ -52,7 +53,8 @@ const std::set<std::string>& Syllables() {
         "sen seng si song sou su suan sui sun suo ya yan yang yao ye yi yin "
         "ying yong you yu yuan yue yun wa wai wan wang wei wen weng wo wu");
     std::string value;
-    while (input >> value) result.insert(value);
+    while (input >> value)
+      result.insert(value);
     return result;
   }();
   return values;
@@ -60,25 +62,23 @@ const std::set<std::string>& Syllables() {
 
 std::string InitialKey(const std::string& initial) {
   static const std::map<std::string, std::string> keys = {
-      {"b", "b"}, {"p", "p"}, {"m", "m"}, {"f", "f"}, {"d", "d"},
-      {"t", "t"}, {"n", "n"}, {"l", "l"}, {"g", "g"}, {"k", "k"},
-      {"h", "h"}, {"j", "j"}, {"q", "q"}, {"x", "x"}, {"zh", "v"},
-      {"ch", "i"}, {"sh", "u"}, {"r", "r"}, {"z", "z"}, {"c", "c"},
-      {"s", "s"}, {"y", "y"}, {"w", "w"}};
+      {"b", "b"}, {"p", "p"}, {"m", "m"},  {"f", "f"},  {"d", "d"},  {"t", "t"},
+      {"n", "n"}, {"l", "l"}, {"g", "g"},  {"k", "k"},  {"h", "h"},  {"j", "j"},
+      {"q", "q"}, {"x", "x"}, {"zh", "v"}, {"ch", "i"}, {"sh", "u"}, {"r", "r"},
+      {"z", "z"}, {"c", "c"}, {"s", "s"},  {"y", "y"},  {"w", "w"}};
   auto it = keys.find(initial);
   return it == keys.end() ? std::string() : it->second;
 }
 
 std::string FinalKey(const std::string& final) {
   static const std::map<std::string, std::string> keys = {
-      {"a", "a"}, {"o", "o"}, {"e", "e"}, {"i", "i"}, {"u", "u"},
-      {"v", "v"}, {"ai", "d"}, {"ei", "w"}, {"ao", "c"}, {"ou", "z"},
-      {"an", "j"}, {"en", "f"}, {"ang", "h"}, {"eng", "g"},
-      {"ong", "s"}, {"ia", "x"}, {"ie", "p"}, {"iao", "n"},
-      {"iu", "q"}, {"ian", "m"}, {"in", "b"}, {"iang", "l"},
-      {"ing", "k"}, {"iong", "s"}, {"ua", "x"}, {"uo", "o"},
-      {"uai", "k"}, {"ui", "v"}, {"uan", "r"}, {"un", "y"},
-      {"uang", "l"}, {"ue", "t"}, {"ve", "t"}, {"er", "r"}};
+      {"a", "a"},    {"o", "o"},    {"e", "e"},   {"i", "i"},    {"u", "u"},
+      {"v", "v"},    {"ai", "d"},   {"ei", "w"},  {"ao", "c"},   {"ou", "z"},
+      {"an", "j"},   {"en", "f"},   {"ang", "h"}, {"eng", "g"},  {"ong", "s"},
+      {"ia", "x"},   {"ie", "p"},   {"iao", "n"}, {"iu", "q"},   {"ian", "m"},
+      {"in", "b"},   {"iang", "l"}, {"ing", "k"}, {"iong", "s"}, {"ua", "x"},
+      {"uo", "o"},   {"uai", "k"},  {"ui", "v"},  {"uan", "r"},  {"un", "y"},
+      {"uang", "l"}, {"ue", "t"},   {"ve", "t"},  {"er", "r"}};
   auto it = keys.find(final);
   return it == keys.end() ? std::string() : it->second;
 }
@@ -86,24 +86,25 @@ std::string FinalKey(const std::string& final) {
 std::map<std::string, std::string> XiaoheCodes() {
   std::map<std::string, std::string> codes;
   const std::vector<std::string> initials = {
-      "", "b", "p", "m", "f", "d", "t", "n", "l", "g", "k", "h",
-      "j", "q", "x", "zh", "ch", "sh", "r", "z", "c", "s", "y",
-      "w"};
+      "",  "b", "p", "m",  "f",  "d",  "t", "n", "l", "g", "k", "h",
+      "j", "q", "x", "zh", "ch", "sh", "r", "z", "c", "s", "y", "w"};
   const std::vector<std::string> finals = {
-      "a", "o", "e", "i", "u", "v", "ai", "ei", "ao", "ou", "an",
-      "en", "ang", "eng", "ong", "ia", "ie", "iao", "iu", "ian", "in",
-      "iang", "ing", "iong", "ua", "uo", "uai", "ui", "uan", "un",
-      "uang", "ue", "ve"};
+      "a",  "o",   "e",  "i",    "u",   "v",    "ai", "ei", "ao",
+      "ou", "an",  "en", "ang",  "eng", "ong",  "ia", "ie", "iao",
+      "iu", "ian", "in", "iang", "ing", "iong", "ua", "uo", "uai",
+      "ui", "uan", "un", "uang", "ue",  "ve"};
   for (const auto& initial : initials) {
     for (const auto& final : finals) {
       std::string syllable = initial + final;
-      if (!Syllables().count(syllable)) continue;
+      if (!Syllables().count(syllable))
+        continue;
       std::string first = InitialKey(initial);
       std::string second = FinalKey(final);
       if (initial.empty()) {
         first = final.empty() ? std::string() : final.substr(0, 1);
       }
-      if (first.empty() || second.empty()) continue;
+      if (first.empty() || second.empty())
+        continue;
       codes[first + second] = syllable;
     }
   }
@@ -111,9 +112,10 @@ std::map<std::string, std::string> XiaoheCodes() {
 }
 
 std::wstring Wide(const std::string& value) {
-  if (value.empty()) return {};
+  if (value.empty())
+    return {};
   int size = MultiByteToWideChar(CP_UTF8, 0, value.data(),
-                                static_cast<int>(value.size()), nullptr, 0);
+                                 static_cast<int>(value.size()), nullptr, 0);
   std::wstring result(size, L'\0');
   MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
                       &result[0], size);
@@ -121,10 +123,11 @@ std::wstring Wide(const std::string& value) {
 }
 
 std::string Utf8(const std::wstring& value) {
-  if (value.empty()) return {};
+  if (value.empty())
+    return {};
   int size = WideCharToMultiByte(CP_UTF8, 0, value.data(),
-                                static_cast<int>(value.size()), nullptr, 0,
-                                nullptr, nullptr);
+                                 static_cast<int>(value.size()), nullptr, 0,
+                                 nullptr, nullptr);
   std::string result(size, '\0');
   WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
                       &result[0], size, nullptr, nullptr);
@@ -136,14 +139,26 @@ std::string JsonString(const std::string& value) {
   out << '"';
   for (unsigned char ch : value) {
     switch (ch) {
-      case '"': out << "\\\""; break;
-      case '\\': out << "\\\\"; break;
-      case '\n': out << "\\n"; break;
-      case '\r': out << "\\r"; break;
-      case '\t': out << "\\t"; break;
+      case '"':
+        out << "\\\"";
+        break;
+      case '\\':
+        out << "\\\\";
+        break;
+      case '\n':
+        out << "\\n";
+        break;
+      case '\r':
+        out << "\\r";
+        break;
+      case '\t':
+        out << "\\t";
+        break;
       default:
-        if (ch < 0x20) out << ' ';
-        else out << ch;
+        if (ch < 0x20)
+          out << ' ';
+        else
+          out << ch;
     }
   }
   out << '"';
@@ -152,10 +167,12 @@ std::string JsonString(const std::string& value) {
 
 std::wstring ReadEnv(const std::wstring& name) {
   DWORD size = GetEnvironmentVariableW(name.c_str(), nullptr, 0);
-  if (!size || size > 8192) return {};
+  if (!size || size > 8192)
+    return {};
   std::wstring value(size, L'\0');
   DWORD read = GetEnvironmentVariableW(name.c_str(), &value[0], size);
-  if (!read || read >= size) return {};
+  if (!read || read >= size)
+    return {};
   value.resize(read);
   return value;
 }
@@ -166,7 +183,8 @@ std::vector<std::wstring> ParseResponse(const std::string& body, int limit) {
     std::stringstream stream(body);
     boost::property_tree::ptree root;
     boost::property_tree::read_json(stream, root);
-    std::string content = root.get<std::string>("choices.0.message.content", "");
+    std::string content =
+        root.get<std::string>("choices.0.message.content", "");
     auto begin = content.find('{');
     auto end = content.rfind('}');
     if (begin == std::string::npos || end == std::string::npos || end < begin)
@@ -177,11 +195,14 @@ std::vector<std::wstring> ParseResponse(const std::string& body, int limit) {
     std::set<std::wstring> seen;
     for (const auto& item : parsed.get_child("candidates")) {
       auto text = item.second.get_value<std::string>();
-      if (text.empty()) continue;
+      if (text.empty())
+        continue;
       std::wstring candidate = Wide(text);
-      if (candidate.empty() || !seen.insert(candidate).second) continue;
+      if (candidate.empty() || !seen.insert(candidate).second)
+        continue;
       result.push_back(candidate);
-      if (static_cast<int>(result.size()) >= limit) break;
+      if (static_cast<int>(result.size()) >= limit)
+        break;
     }
   } catch (...) {
     result.clear();
@@ -206,11 +227,15 @@ InputPaths ParseInput(const std::string& raw_input,
   for (size_t i = 0; i < raw_input.size(); ++i) {
     std::string initial(1, static_cast<char>(std::tolower(raw_input[i])));
     if (scheme == "xiaohe") {
-      if (initial == "v") initial = "zh";
-      else if (initial == "i") initial = "ch";
-      else if (initial == "u") initial = "sh";
+      if (initial == "v")
+        initial = "zh";
+      else if (initial == "i")
+        initial = "ch";
+      else if (initial == "u")
+        initial = "sh";
     }
-    if (!initials.empty()) initials += ' ';
+    if (!initials.empty())
+      initials += ' ';
     initials += initial;
   }
   paths.initials = initials;
@@ -219,8 +244,12 @@ InputPaths ParseInput(const std::string& raw_input,
     std::string phonetic;
     for (size_t i = 0; i < raw_input.size(); i += 2) {
       auto it = codes.find(raw_input.substr(i, 2));
-      if (it == codes.end()) { phonetic.clear(); break; }
-      if (!phonetic.empty()) phonetic += ' ';
+      if (it == codes.end()) {
+        phonetic.clear();
+        break;
+      }
+      if (!phonetic.empty())
+        phonetic += ' ';
       phonetic += it->second;
     }
     if (!phonetic.empty()) {
@@ -233,11 +262,15 @@ InputPaths ParseInput(const std::string& raw_input,
     std::vector<bool> reachable(raw_input.size() + 1, false);
     reachable[0] = true;
     for (size_t i = 0; i < raw_input.size(); ++i) {
-      if (!reachable[i]) continue;
-      for (size_t length = 1; length <= 6 && i + length <= raw_input.size(); ++length) {
+      if (!reachable[i])
+        continue;
+      for (size_t length = 1; length <= 6 && i + length <= raw_input.size();
+           ++length) {
         std::string syllable = raw_input.substr(i, length);
-        if (!Syllables().count(syllable)) continue;
-        best[i + length] = best[i].empty() ? syllable : best[i] + " " + syllable;
+        if (!Syllables().count(syllable))
+          continue;
+        best[i + length] =
+            best[i].empty() ? syllable : best[i] + " " + syllable;
         reachable[i + length] = true;
       }
     }
@@ -260,9 +293,10 @@ std::vector<std::wstring> RequestCandidates(const std::wstring& base_url,
                                             int cache_ttl_seconds,
                                             int cache_max_entries) {
   std::vector<std::wstring> empty;
-  const std::string cache_key = Utf8(base_url) + "\n" + Utf8(model) + "\n" + input.schema_id + "\n" +
-      input.raw_input + "\n" + input.phonetic + "\n" + input.initials + "\n" +
-      Utf8(context);
+  const std::string cache_key = Utf8(base_url) + "\n" + Utf8(model) + "\n" +
+                                input.schema_id + "\n" + input.raw_input +
+                                "\n" + input.phonetic + "\n" + input.initials +
+                                "\n" + Utf8(context);
   if (cache_enabled) {
     std::lock_guard<std::mutex> lock(g_cache_mutex);
     auto cached = g_cache.find(cache_key);
@@ -274,9 +308,11 @@ std::vector<std::wstring> RequestCandidates(const std::wstring& base_url,
     }
   }
   std::wstring key = ReadEnv(api_key_env);
-  if (key.empty() || base_url.empty() || model.empty()) return empty;
+  if (key.empty() || base_url.empty() || model.empty())
+    return empty;
   std::wstring url = base_url;
-  while (!url.empty() && url.back() == L'/') url.pop_back();
+  while (!url.empty() && url.back() == L'/')
+    url.pop_back();
   constexpr wchar_t kCompletionsPath[] = L"/chat/completions";
   const size_t suffix_length = _countof(kCompletionsPath) - 1;
   if (url.size() < suffix_length ||
@@ -289,63 +325,99 @@ std::vector<std::wstring> RequestCandidates(const std::wstring& base_url,
   parts.dwHostNameLength = static_cast<DWORD>(-1);
   parts.dwUrlPathLength = static_cast<DWORD>(-1);
   parts.dwExtraInfoLength = static_cast<DWORD>(-1);
-  if (!WinHttpCrackUrl(url.c_str(), 0, 0, &parts)) return empty;
+  if (!WinHttpCrackUrl(url.c_str(), 0, 0, &parts))
+    return empty;
   std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
-  if (parts.nScheme != INTERNET_SCHEME_HTTPS &&
-      host != L"localhost" && host != L"127.0.0.1" && host != L"::1")
+  if (parts.nScheme != INTERNET_SCHEME_HTTPS && host != L"localhost" &&
+      host != L"127.0.0.1" && host != L"::1")
     return empty;
   std::wstring path(parts.lpszUrlPath, parts.dwUrlPathLength);
-  if (parts.dwExtraInfoLength) path.append(parts.lpszExtraInfo, parts.dwExtraInfoLength);
-  HINTERNET session = WinHttpOpen(L"Weasel-LLM/1.0",
-      WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME,
-      WINHTTP_NO_PROXY_BYPASS, 0);
-  if (!session) return empty;
+  if (parts.dwExtraInfoLength)
+    path.append(parts.lpszExtraInfo, parts.dwExtraInfoLength);
+  HINTERNET session =
+      WinHttpOpen(L"Weasel-LLM/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                  WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+  if (!session)
+    return empty;
   timeout_ms = max(500, min(15000, timeout_ms));
   WinHttpSetTimeouts(session, timeout_ms, timeout_ms, timeout_ms, timeout_ms);
   HINTERNET connection = WinHttpConnect(session, host.c_str(), parts.nPort, 0);
-  HINTERNET request = connection ? WinHttpOpenRequest(connection, L"POST",
-      path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
-      parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0) : nullptr;
+  HINTERNET request =
+      connection
+          ? WinHttpOpenRequest(connection, L"POST", path.c_str(), nullptr,
+                               WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+                               parts.nScheme == INTERNET_SCHEME_HTTPS
+                                   ? WINHTTP_FLAG_SECURE
+                                   : 0)
+          : nullptr;
   if (!request) {
-    if (connection) WinHttpCloseHandle(connection);
+    if (connection)
+      WinHttpCloseHandle(connection);
     WinHttpCloseHandle(session);
     return empty;
   }
-  std::string user_data = "{\"context\":" + JsonString(Utf8(context)) +
-      ",\"raw_input\":" + JsonString(input.raw_input) +
-      ",\"phonetic\":" + (input.has_phonetic ? JsonString(input.phonetic) : "null") +
+  std::string user_data =
+      "{\"context\":" + JsonString(Utf8(context)) +
+      ",\"raw_input\":" + JsonString(input.raw_input) + ",\"phonetic\":" +
+      (input.has_phonetic ? JsonString(input.phonetic) : "null") +
       ",\"initials\":" + JsonString(input.initials) + "}";
-  std::string system_prompt = input.has_phonetic
-      ? "你是中文输入法候选生成器。raw_input 仅供调试，不得据此推导小鹤键位。结合光标前文本，在 phonetic 和 initials 两种本地解析中消歧，生成最多五个符合编码的中文候选。不要解释，只返回 JSON 对象 {\\\"candidates\\\":[\\\"候选\\\"]}。"
-      : "你是中文输入法候选生成器。raw_input 仅供调试，不得据此推导键位；本次只有 initials 是有效输入解释。initials 已由本地标准化。结合光标前文本生成最多五个符合 initials 的中文候选。不要解释，只返回 JSON 对象 {\\\"candidates\\\":[\\\"候选\\\"]}。";
-  std::string body = "{\"model\":" + JsonString(Utf8(model)) +
-      ",\"temperature\":0,\"response_format\":{\"type\":\"json_object\"},\"messages\":[{\"role\":\"system\",\"content\":" + JsonString(system_prompt) +
+  std::string system_prompt =
+      input.has_phonetic
+          ? "你是中文输入法候选生成器。raw_input "
+            "仅供调试，不得据此推导小鹤键位。结合光标前文本，在 phonetic 和 "
+            "initials "
+            "两种本地解析中消歧，生成最多五个符合编码的中文候选。不要解释，只返"
+            "回 JSON 对象 {\\\"candidates\\\":[\\\"候选\\\"]}。"
+          : "你是中文输入法候选生成器。raw_input "
+            "仅供调试，不得据此推导键位；本次只有 initials "
+            "是有效输入解释。initials "
+            "已由本地标准化。结合光标前文本生成最多五个符合 initials "
+            "的中文候选。不要解释，只返回 JSON 对象 "
+            "{\\\"candidates\\\":[\\\"候选\\\"]}。";
+  std::string body =
+      "{\"model\":" + JsonString(Utf8(model)) +
+      ",\"temperature\":0,\"response_format\":{\"type\":\"json_object\"},"
+      "\"messages\":[{\"role\":\"system\",\"content\":" +
+      JsonString(system_prompt) +
       "},{\"role\":\"user\",\"content\":" + JsonString(user_data) + "}]}";
-  std::wstring headers = L"Content-Type: application/json\r\nAuthorization: Bearer " + key + L"\r\n";
-  bool sent = WinHttpSendRequest(request, headers.c_str(), static_cast<DWORD>(headers.size()),
-      const_cast<char*>(body.data()), static_cast<DWORD>(body.size()), static_cast<DWORD>(body.size()), 0) &&
-      WinHttpReceiveResponse(request, nullptr);
+  std::wstring headers =
+      L"Content-Type: application/json\r\nAuthorization: Bearer " + key +
+      L"\r\n";
+  bool sent = WinHttpSendRequest(request, headers.c_str(),
+                                 static_cast<DWORD>(headers.size()),
+                                 const_cast<char*>(body.data()),
+                                 static_cast<DWORD>(body.size()),
+                                 static_cast<DWORD>(body.size()), 0) &&
+              WinHttpReceiveResponse(request, nullptr);
   std::string response;
   DWORD status = 0, status_size = sizeof(status);
-  if (sent) WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-      WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size, WINHTTP_NO_HEADER_INDEX);
+  if (sent)
+    WinHttpQueryHeaders(request,
+                        WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                        WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
+                        WINHTTP_NO_HEADER_INDEX);
   if (sent && status >= 200 && status < 300) {
     DWORD available = 0;
     while (WinHttpQueryDataAvailable(request, &available) && available > 0) {
       std::string chunk(available, '\0');
       DWORD read = 0;
-      if (!WinHttpReadData(request, &chunk[0], available, &read) || !read) break;
+      if (!WinHttpReadData(request, &chunk[0], available, &read) || !read)
+        break;
       chunk.resize(read);
       response += chunk;
-      if (response.size() > 1024 * 1024) { response.clear(); break; }
+      if (response.size() > 1024 * 1024) {
+        response.clear();
+        break;
+      }
     }
   }
   WinHttpCloseHandle(request);
   WinHttpCloseHandle(connection);
   WinHttpCloseHandle(session);
-  auto candidates = response.empty()
-                        ? empty
-                        : ParseResponse(response, max(1, min(5, candidate_count)));
+  auto candidates =
+      response.empty()
+          ? empty
+          : ParseResponse(response, max(1, min(5, candidate_count)));
   if (cache_enabled && !candidates.empty() && cache_max_entries > 0) {
     std::lock_guard<std::mutex> lock(g_cache_mutex);
     while (static_cast<int>(g_cache.size()) >= cache_max_entries)

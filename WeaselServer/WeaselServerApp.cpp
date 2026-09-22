@@ -31,9 +31,8 @@ int WeaselServerApp::Run() {
 
   m_handler->Initialize();
   m_handler->OnUpdateUI([this]() { tray_icon.RequestRefresh(); });
-  m_handler->SetAsyncRefresh([this](DWORD session_id) {
-    m_server.PostRefreshSession(session_id);
-  });
+  m_handler->SetAsyncRefresh(
+      [this](DWORD session_id) { m_server.PostRefreshSession(session_id); });
 
   tray_icon.Create(m_server.GetHWnd());
   m_server.SetTrayRefreshCallback([this]() { tray_icon.ApplyRefresh(); });

@@ -28,9 +28,9 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
       if (static_cast<LONG>(raw_context.size()) > context_chars) {
         const size_t cut = raw_context.size() - context_chars;
         const size_t limit = min(raw_context.size(), cut + search_chars);
-        const wchar_t* boundaries[] = {L"\r\n\r\n", L"\n\n", L"\r\n",
-                                        L"\n", L"。", L"！", L"？", L"；",
-                                        L"：", L"，"};
+        const wchar_t* boundaries[] = {L"\r\n\r\n", L"\n\n", L"\r\n", L"\n",
+                                       L"。",       L"！",   L"？",   L"；",
+                                       L"：",       L"，"};
         const size_t lengths[] = {4, 2, 2, 1, 1, 1, 1, 1, 1, 1};
         size_t start = std::wstring::npos;
         size_t skip = 0;
@@ -97,8 +97,8 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
 }
 
 std::wstring WeaselTSF::_ReadTextBeforeCaret(TfEditCookie ec,
-                                              ITfContext* pContext,
-                                              LONG maxChars) {
+                                             ITfContext* pContext,
+                                             LONG maxChars) {
   if (!pContext || maxChars <= 0)
     return std::wstring();
 
@@ -117,9 +117,8 @@ std::wstring WeaselTSF::_ReadTextBeforeCaret(TfEditCookie ec,
   if (FAILED(clone_result) || !cloned_range)
     return std::wstring();
   range.Attach(cloned_range);
-  const TfAnchor anchor = selection.style.ase == TF_AE_START
-                              ? TF_ANCHOR_START
-                              : TF_ANCHOR_END;
+  const TfAnchor anchor =
+      selection.style.ase == TF_AE_START ? TF_ANCHOR_START : TF_ANCHOR_END;
   if (FAILED(range->Collapse(ec, anchor)))
     return std::wstring();
 

@@ -146,9 +146,9 @@ LRESULT ServerImpl::OnServiceNotifyMessage(UINT uMsg,
 }
 
 LRESULT ServerImpl::OnAsyncRefresh(UINT uMsg,
-                                  WPARAM wParam,
-                                  LPARAM lParam,
-                                  BOOL& bHandled) {
+                                   WPARAM wParam,
+                                   LPARAM lParam,
+                                   BOOL& bHandled) {
   std::lock_guard guard(g_api_mutex);
   if (m_pRequestHandler)
     m_pRequestHandler->RefreshSession(static_cast<DWORD>(wParam));

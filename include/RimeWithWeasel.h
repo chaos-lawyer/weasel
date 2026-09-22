@@ -92,8 +92,8 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   virtual void FocusIn(DWORD param, WeaselSessionId ipc_id);
   virtual void FocusOut(DWORD param, WeaselSessionId ipc_id);
   virtual void SubmitLlmContext(WeaselSessionId ipc_id,
-                               const std::wstring& request_id,
-                               const std::wstring& context);
+                                const std::wstring& request_id,
+                                const std::wstring& context);
   virtual void RefreshSession(DWORD ipc_id);
   virtual void UpdateInputPosition(RECT const& rc, WeaselSessionId ipc_id);
   virtual void StartMaintenance();
