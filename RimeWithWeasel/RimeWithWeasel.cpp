@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <map>
 #include <array>
 #include <vector>
@@ -689,6 +690,7 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
   cinfo.is_last_page = ctx.menu.is_last_page;
 
   cinfo.current_detail.clear();
+  cinfo.current_detail_width = 0;
   if (session_id) {
     char detail_buf[8192] = {0};
     if (rime_api->get_property(session_id, "candidate_detail", detail_buf,
@@ -703,6 +705,19 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
                                  sizeof(detail_buf)) &&
           detail_buf[0] != '\0') {
         cinfo.current_detail.str = escape_string(u8tow(detail_buf));
+      }
+    }
+
+    char detail_width_buf[16] = {0};
+    if (!cinfo.current_detail.empty() &&
+        rime_api->get_property(session_id, "candidate_detail_width",
+                               detail_width_buf, sizeof(detail_width_buf)) &&
+        detail_width_buf[0] != '\0') {
+      char* end = nullptr;
+      const long width = std::strtol(detail_width_buf, &end, 10);
+      if (end != detail_width_buf && *end == '\0' && width >= 80 &&
+          width <= 2048) {
+        cinfo.current_detail_width = static_cast<int>(width);
       }
     }
   }
@@ -2010,6 +2025,11 @@ static bool _UpdateUIStyleColor(RimeConfig* config,
           blend_colors(style.detail_text_color, style.detail_back_color
                                                     ? style.detail_back_color
                                                     : style.back_color));
+    COLOR("candidate_detail_emphasis_text_color",
+          style.detail_emphasis_text_color,
+          style.hilited_candidate_back_color
+              ? style.hilited_candidate_back_color
+              : style.hilited_back_color);
 #undef COLOR
     return true;
   }

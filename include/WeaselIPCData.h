@@ -88,21 +88,26 @@ struct CandidateInfo {
     comments.clear();
     labels.clear();
     current_detail.clear();
+    current_detail_width = 0;
   }
   bool empty() const { return candies.empty(); }
   bool operator==(const CandidateInfo& ci) {
     if (currentPage != ci.currentPage || totalPages != ci.totalPages ||
         highlighted != ci.highlighted || is_last_page != ci.is_last_page ||
-        current_detail != ci.current_detail || notequal(candies, ci.candies) ||
-        notequal(comments, ci.comments) || notequal(labels, ci.labels))
+        current_detail != ci.current_detail ||
+        current_detail_width != ci.current_detail_width ||
+        notequal(candies, ci.candies) || notequal(comments, ci.comments) ||
+        notequal(labels, ci.labels))
       return false;
     return true;
   }
   bool operator!=(const CandidateInfo& ci) {
     if (currentPage != ci.currentPage || totalPages != ci.totalPages ||
         highlighted != ci.highlighted || is_last_page != ci.is_last_page ||
-        current_detail != ci.current_detail || notequal(candies, ci.candies) ||
-        notequal(comments, ci.comments) || notequal(labels, ci.labels))
+        current_detail != ci.current_detail ||
+        current_detail_width != ci.current_detail_width ||
+        notequal(candies, ci.candies) || notequal(comments, ci.comments) ||
+        notequal(labels, ci.labels))
       return true;
     return false;
   }
@@ -123,6 +128,9 @@ struct CandidateInfo {
   std::vector<Text> comments;
   std::vector<Text> labels;
   Text current_detail;
+  // Optional per-composition detail-panel width supplied by the schema.
+  // Zero means use style/candidate_detail_panel/width.
+  int current_detail_width = 0;
 };
 
 struct Context {
@@ -330,6 +338,7 @@ struct UIStyle {
   bool detail_draw_line_separators;
   int detail_line_separator_color;
   int detail_key_text_color;
+  int detail_emphasis_text_color;
 
   UIStyle()
       : font_face(),
@@ -423,7 +432,8 @@ struct UIStyle {
         detail_linespacing(0),
         detail_draw_line_separators(false),
         detail_line_separator_color(0),
-        detail_key_text_color(0) {}
+        detail_key_text_color(0),
+        detail_emphasis_text_color(0) {}
   bool operator!=(const UIStyle& st) const {
     return (
         align_type != st.align_type || antialias_mode != st.antialias_mode ||
@@ -504,7 +514,8 @@ struct UIStyle {
         detail_linespacing != st.detail_linespacing ||
         detail_draw_line_separators != st.detail_draw_line_separators ||
         detail_line_separator_color != st.detail_line_separator_color ||
-        detail_key_text_color != st.detail_key_text_color);
+        detail_key_text_color != st.detail_key_text_color ||
+        detail_emphasis_text_color != st.detail_emphasis_text_color);
   }
   bool operator==(const UIStyle& st) const { return !(*this != st); }
 };
@@ -613,6 +624,9 @@ void serialize(Archive& ar, weasel::UIStyle& s, const unsigned int version) {
     ar & s.detail_han_font_face;
     ar & s.detail_latin_font_face;
   }
+  if (version >= 3) {
+    ar & s.detail_emphasis_text_color;
+  }
 }
 
 template <typename Archive>
@@ -628,6 +642,9 @@ void serialize(Archive& ar,
   ar & s.labels;
   if (version >= 1) {
     ar & s.current_detail;
+  }
+  if (version >= 2) {
+    ar & s.current_detail_width;
   }
 }
 template <typename Archive>
@@ -650,6 +667,6 @@ void serialize(Archive& ar, weasel::TextRange& s, const unsigned int version) {
 }
 }  // namespace serialization
 }  // namespace boost
-BOOST_CLASS_VERSION(weasel::CandidateInfo, 1)
-BOOST_CLASS_VERSION(weasel::UIStyle, 2)
+BOOST_CLASS_VERSION(weasel::CandidateInfo, 2)
+BOOST_CLASS_VERSION(weasel::UIStyle, 3)
 #endif

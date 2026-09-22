@@ -177,6 +177,32 @@ void test_auto_position_resolution() {
                  DetailPanelPosition::Auto)) == "auto");
 }
 
+void test_vertical_auto_position_stays_on_first_usable_side() {
+  DetailPanelRect work_area = {0, 0, 1920, 1080};
+  DetailPanelGeometryConfig config;
+  config.preferred_position = DetailPanelPosition::Right;
+  config.gap = 10;
+
+  // The first candidate window is near the right edge, so the normal fallback
+  // places the panel on the left and that actual side becomes session state.
+  DetailPanelRect first_candidate = {1700, 300, 1900, 600};
+  DetailPanelRect first_pos = CalculateDetailPanelPosition(
+      first_candidate, work_area, 320, 200, config);
+  DetailPanelPosition locked_side = DetectDetailPanelHorizontalSide(
+      first_candidate, first_pos, config.preferred_position);
+  BOOST_TEST(locked_side == DetailPanelPosition::Left);
+
+  // A later candidate-window geometry can now fit on the right.  Passing the
+  // remembered side prevents a selection-only update from jumping across.
+  DetailPanelRect later_candidate = {1000, 300, 1200, 600};
+  config.preferred_position = locked_side;
+  DetailPanelRect later_pos = CalculateDetailPanelPosition(
+      later_candidate, work_area, 320, 260, config);
+  BOOST_TEST(later_pos.right <= later_candidate.left);
+  BOOST_TEST(DetectDetailPanelHorizontalSide(later_candidate, later_pos,
+                                             locked_side) == locked_side);
+}
+
 void test_detail_emphasis_markup() {
   ParsedDetailPanelText parsed =
       ParseDetailPanelText(L"状态：**重点客户**，等级：**A 类**");
@@ -198,6 +224,22 @@ void test_detail_emphasis_markup() {
   parsed = ParseDetailPanelText(L"空标记：****");
   BOOST_TEST(parsed.text == L"空标记：****");
   BOOST_TEST(parsed.emphasis_ranges.empty());
+
+  // Colons are ordinary legal prose punctuation.  They must not create an
+  // implicit emphasis range; only explicit paired ** markers do that.
+  parsed = ParseDetailPanelText(L"经查：行为人以暴力手段实施犯罪。");
+  BOOST_TEST(parsed.text == L"经查：行为人以暴力手段实施犯罪。");
+  BOOST_TEST(parsed.emphasis_ranges.empty());
+}
+
+void test_detail_text_vertical_origin_centers_glyph_bounds() {
+  // A 20px glyph box offset 3px below its line-box origin in a 40px content
+  // area must start at y=7: visible bounds then occupy [10, 30], leaving 10px
+  // above and below.
+  const float origin = CalculateDetailPanelTextOriginY(40.0f, 3.0f, 20.0f);
+  BOOST_TEST_EQ(origin, 7.0f);
+  BOOST_TEST_EQ(origin + 3.0f, 10.0f);
+  BOOST_TEST_EQ(40.0f - (origin + 3.0f + 20.0f), 10.0f);
 }
 
 // 7. CandidateInfo 数据结构与 equality 测试
@@ -216,6 +258,21 @@ void test_candidate_info_detail() {
   ci1.clear();
   BOOST_TEST(ci1.current_detail.empty());
   BOOST_TEST(ci1 != ci2);
+}
+
+void test_candidate_info_detail_width() {
+  CandidateInfo ci1;
+  CandidateInfo ci2;
+  BOOST_TEST(ci1.current_detail_width == 0);
+  BOOST_TEST(ci1 == ci2);
+
+  ci1.current_detail_width = 360;
+  BOOST_TEST(ci1 != ci2);
+  ci2.current_detail_width = 360;
+  BOOST_TEST(ci1 == ci2);
+
+  ci1.clear();
+  BOOST_TEST(ci1.current_detail_width == 0);
 }
 
 // 8. UIStyle 默认配置与兼容性测试
@@ -239,6 +296,7 @@ void test_ui_style_defaults() {
   BOOST_TEST_EQ(style1.detail_draw_line_separators, false);
   BOOST_TEST_EQ(style1.detail_line_separator_color, 0);
   BOOST_TEST_EQ(style1.detail_key_text_color, 0);
+  BOOST_TEST_EQ(style1.detail_emphasis_text_color, 0);
   BOOST_TEST(style1 == style1);
   BOOST_TEST(!(style1 != style2));
 
@@ -277,8 +335,11 @@ int main() {
   test_position_left_preference_and_flip();
   test_min_max_width_constraint();
   test_auto_position_resolution();
+  test_vertical_auto_position_stays_on_first_usable_side();
   test_detail_emphasis_markup();
+  test_detail_text_vertical_origin_centers_glyph_bounds();
   test_candidate_info_detail();
+  test_candidate_info_detail_width();
   test_ui_style_defaults();
 
   std::cout << "All CandidateDetailPanel tests passed successfully!"

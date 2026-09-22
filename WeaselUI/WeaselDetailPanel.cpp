@@ -33,6 +33,21 @@ DetailPanelPosition ResolveConfiguredPosition(const UIStyle& style) {
       IsVerticalCandidateLayout(style.layout_type));
 }
 
+bool ShouldLockVerticalAutoPosition(const UIStyle& style) {
+  return style.detail_position == UIStyle::DETAIL_POS_AUTO &&
+         IsVerticalCandidateLayout(style.layout_type);
+}
+
+DetailPanelPosition ResolvePlacementPreference(
+    const UIStyle& style,
+    DetailPanelPosition locked_vertical_side) {
+  if (ShouldLockVerticalAutoPosition(style) &&
+      locked_vertical_side != DetailPanelPosition::Auto) {
+    return locked_vertical_side;
+  }
+  return ResolveConfiguredPosition(style);
+}
+
 bool IsHanCharacter(wchar_t character) {
   return (character >= 0x3400 && character <= 0x4DBF) ||
          (character >= 0x4E00 && character <= 0x9FFF) ||
@@ -105,7 +120,7 @@ LRESULT WeaselDetailPanel::OnDestroy(UINT uMsg,
                                      BOOL& bHandled) {
   m_pRenderTarget.Reset();
   m_pBrush.Reset();
-  m_pKeyBrush.Reset();
+  m_pEmphasisBrush.Reset();
   m_pSeparatorBrush.Reset();
   return 0;
 }
@@ -129,6 +144,7 @@ void WeaselDetailPanel::Hide() {
   }
   m_last_detail_text.clear();
   m_last_candidate_index = -1;
+  m_locked_vertical_side = DetailPanelPosition::Auto;
 }
 
 void WeaselDetailPanel::Destroy() {
@@ -151,6 +167,7 @@ void WeaselDetailPanel::_UpdateDpi(const CRect& rcCandidate) {
 void WeaselDetailPanel::Update(const std::wstring& detail_text,
                                int candidate_index,
                                const CRect& rcCandidate,
+                               int width_override,
                                const PDWR& pdwr) {
   if (!m_style.detail_enabled || detail_text.empty()) {
     Hide();
@@ -196,7 +213,9 @@ void WeaselDetailPanel::Update(const std::wstring& detail_text,
                  : (m_style.font_point > 0 ? m_style.font_point : 12));
 
   int configured_width =
-      DPI_SCALE(m_style.detail_width > 0 ? m_style.detail_width : 320);
+      DPI_SCALE(width_override > 0
+                    ? width_override
+                    : (m_style.detail_width > 0 ? m_style.detail_width : 320));
   int padding_x =
       DPI_SCALE(m_style.detail_padding_x > 0 ? m_style.detail_padding_x : 12);
   int padding_y =
@@ -244,12 +263,15 @@ void WeaselDetailPanel::Update(const std::wstring& detail_text,
   // Truncate to max_lines if configured
   if (m_style.detail_max_lines > 0 &&
       metrics.lineCount > (UINT32)m_style.detail_max_lines) {
-    std::vector<DWRITE_LINE_METRICS> lineMetrics(m_style.detail_max_lines);
+    std::vector<DWRITE_LINE_METRICS> lineMetrics(metrics.lineCount);
     UINT32 actualLineCount = 0;
-    pTextLayout->GetLineMetrics(lineMetrics.data(), m_style.detail_max_lines,
+    pTextLayout->GetLineMetrics(lineMetrics.data(), metrics.lineCount,
                                 &actualLineCount);
     float trimmed_height = 0.0f;
-    for (UINT32 i = 0; i < actualLineCount; ++i) {
+    const UINT32 visibleLineCount =
+        (std::min)(actualLineCount,
+                   static_cast<UINT32>(m_style.detail_max_lines));
+    for (UINT32 i = 0; i < visibleLineCount; ++i) {
       trimmed_height += lineMetrics[i].height;
     }
 
@@ -287,7 +309,8 @@ void WeaselDetailPanel::Update(const std::wstring& detail_text,
                                rcWork.bottom};
 
   DetailPanelGeometryConfig geom_config;
-  geom_config.preferred_position = ResolveConfiguredPosition(m_style);
+  geom_config.preferred_position =
+      ResolvePlacementPreference(m_style, m_locked_vertical_side);
   geom_config.gap = DPI_SCALE(m_style.detail_gap > 0 ? m_style.detail_gap : 8);
   geom_config.min_width = DPI_SCALE(m_style.detail_min_width);
   geom_config.max_width = DPI_SCALE(m_style.detail_max_width);
@@ -297,6 +320,11 @@ void WeaselDetailPanel::Update(const std::wstring& detail_text,
 
   DetailPanelRect pos = CalculateDetailPanelPosition(
       cand_rect, work_rect, content_width, content_height, geom_config);
+
+  if (ShouldLockVerticalAutoPosition(m_style)) {
+    m_locked_vertical_side = DetectDetailPanelHorizontalSide(
+        cand_rect, pos, geom_config.preferred_position);
+  }
 
   m_current_content_width = content_width;
   m_current_content_height = content_height;
@@ -331,7 +359,8 @@ void WeaselDetailPanel::Reposition(const CRect& rcCandidate) {
                                rcWork.bottom};
 
   DetailPanelGeometryConfig geom_config;
-  geom_config.preferred_position = ResolveConfiguredPosition(m_style);
+  geom_config.preferred_position =
+      ResolvePlacementPreference(m_style, m_locked_vertical_side);
   geom_config.gap = DPI_SCALE(m_style.detail_gap > 0 ? m_style.detail_gap : 8);
   geom_config.min_width = DPI_SCALE(m_style.detail_min_width);
   geom_config.max_width = DPI_SCALE(m_style.detail_max_width);
@@ -339,6 +368,11 @@ void WeaselDetailPanel::Reposition(const CRect& rcCandidate) {
   DetailPanelRect pos = CalculateDetailPanelPosition(
       cand_rect, work_rect, m_current_content_width, m_current_content_height,
       geom_config);
+
+  if (ShouldLockVerticalAutoPosition(m_style)) {
+    m_locked_vertical_side = DetectDetailPanelHorizontalSide(
+        cand_rect, pos, geom_config.preferred_position);
+  }
 
   m_current_pos = pos;
   m_last_candidate_rect = rcCandidate;
@@ -506,7 +540,7 @@ void WeaselDetailPanel::_Render(const ParsedDetailPanelText& parsed_detail,
           }
 
           float max_text_width = (float)max(20, content_width - 2 * padding_x);
-          float max_text_height = (float)content_height;
+          float max_text_height = (float)max(1, content_height - 2 * padding_y);
 
           ComPtr<IDWriteTextLayout> pTextLayout;
           pdwr->pDWFactory->CreateTextLayout(
@@ -518,25 +552,43 @@ void WeaselDetailPanel::_Render(const ParsedDetailPanelText& parsed_detail,
             ApplyConfiguredFonts(pTextLayout.Get(), detail_text, m_style);
 
             if (m_style.detail_max_lines > 0) {
-              std::vector<DWRITE_LINE_METRICS> lineMetrics(
-                  m_style.detail_max_lines);
-              UINT32 actualLineCount = 0;
-              pTextLayout->GetLineMetrics(lineMetrics.data(),
-                                          m_style.detail_max_lines,
-                                          &actualLineCount);
-              float trimmed_height = 0.0f;
-              for (UINT32 i = 0; i < actualLineCount; ++i) {
-                trimmed_height += lineMetrics[i].height;
-              }
+              UINT32 totalLineCount = 0;
+              pTextLayout->GetLineMetrics(nullptr, 0, &totalLineCount);
+              if (totalLineCount >
+                  static_cast<UINT32>(m_style.detail_max_lines)) {
+                std::vector<DWRITE_LINE_METRICS> lineMetrics(totalLineCount);
+                UINT32 actualLineCount = 0;
+                pTextLayout->GetLineMetrics(lineMetrics.data(), totalLineCount,
+                                            &actualLineCount);
+                const UINT32 visibleLineCount =
+                    (std::min)(actualLineCount,
+                               static_cast<UINT32>(m_style.detail_max_lines));
+                float trimmed_height = 0.0f;
+                for (UINT32 i = 0; i < visibleLineCount; ++i) {
+                  trimmed_height += lineMetrics[i].height;
+                }
 
-              DWRITE_TRIMMING trimming = {DWRITE_TRIMMING_GRANULARITY_CHARACTER,
-                                          0, 0};
-              ComPtr<IDWriteInlineObject> pEllipsis;
-              pdwr->pDWFactory->CreateEllipsisTrimmingSign(
-                  pTextFormat.Get(), pEllipsis.ReleaseAndGetAddressOf());
-              pTextLayout->SetTrimming(&trimming, pEllipsis.Get());
-              pTextLayout->SetMaxHeight(trimmed_height);
+                DWRITE_TRIMMING trimming = {
+                    DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+                ComPtr<IDWriteInlineObject> pEllipsis;
+                pdwr->pDWFactory->CreateEllipsisTrimmingSign(
+                    pTextFormat.Get(), pEllipsis.ReleaseAndGetAddressOf());
+                pTextLayout->SetTrimming(&trimming, pEllipsis.Get());
+                pTextLayout->SetMaxHeight(trimmed_height);
+              }
             }
+
+            // `metrics.top` is the glyph bounds' offset within DirectWrite's
+            // line box.  The panel is sized from the glyph height, so drawing
+            // from the raw padding would leave that offset only above the
+            // text.  Center the actual bounds to make top/bottom whitespace
+            // visually equal.
+            DWRITE_TEXT_METRICS text_metrics = {};
+            pTextLayout->GetMetrics(&text_metrics);
+            const float text_origin_y =
+                (float)blurMarginY + CalculateDetailPanelTextOriginY(
+                                         (float)content_height,
+                                         text_metrics.top, text_metrics.height);
 
             COLORREF text_color_ref =
                 m_style.detail_text_color
@@ -562,26 +614,25 @@ void WeaselDetailPanel::_Render(const ParsedDetailPanelText& parsed_detail,
               m_pBrush->SetColor(D2D1::ColorF(r, g, b, alpha));
             }
 
-            // Key brush (for label before colon like "发布机关：", softer
-            // contrast)
-            COLORREF key_color_ref = m_style.detail_key_text_color
-                                         ? m_style.detail_key_text_color
-                                         : text_color_ref;
-            float kr = (float)GetRValue(key_color_ref) / 255.0f;
-            float kg = (float)GetGValue(key_color_ref) / 255.0f;
-            float kb = (float)GetBValue(key_color_ref) / 255.0f;
-            float kalpha = (float)((key_color_ref >> 24) & 255) / 255.0f;
-            if (kalpha <= 0.0f) {
-              // If not explicitly set with alpha, give a refined secondary
-              // opacity 0.72
-              kalpha = m_style.detail_key_text_color ? 1.0f : 0.72f;
+            // The emphasis color defaults to the active skin's primary
+            // candidate color. It can be overridden independently.
+            COLORREF emphasis_color_ref =
+                m_style.detail_emphasis_text_color
+                    ? m_style.detail_emphasis_text_color
+                    : text_color_ref;
+            float er = (float)GetRValue(emphasis_color_ref) / 255.0f;
+            float eg = (float)GetGValue(emphasis_color_ref) / 255.0f;
+            float eb = (float)GetBValue(emphasis_color_ref) / 255.0f;
+            float ealpha = (float)((emphasis_color_ref >> 24) & 255) / 255.0f;
+            if (ealpha <= 0.0f) {
+              ealpha = 1.0f;
             }
-            if (!m_pKeyBrush) {
+            if (!m_pEmphasisBrush) {
               m_pRenderTarget->CreateSolidColorBrush(
-                  D2D1::ColorF(kr, kg, kb, kalpha),
-                  m_pKeyBrush.ReleaseAndGetAddressOf());
+                  D2D1::ColorF(er, eg, eb, ealpha),
+                  m_pEmphasisBrush.ReleaseAndGetAddressOf());
             } else {
-              m_pKeyBrush->SetColor(D2D1::ColorF(kr, kg, kb, kalpha));
+              m_pEmphasisBrush->SetColor(D2D1::ColorF(er, eg, eb, ealpha));
             }
 
             // Separator line brush
@@ -608,45 +659,13 @@ void WeaselDetailPanel::_Render(const ParsedDetailPanelText& parsed_detail,
               m_pSeparatorBrush->SetColor(D2D1::ColorF(sr, sg, sb, salpha));
             }
 
-            // Scan lines to apply rich typography:
-            // 1. Key label (before ':' or '：') uses m_pKeyBrush and
-            // normal/medium weight
-            // 2. Value (after colon) uses main text brush and semi-bold weight
-            size_t line_start = 0;
-            while (line_start < detail_text.length()) {
-              size_t line_end = detail_text.find(L'\n', line_start);
-              if (line_end == std::wstring::npos) {
-                line_end = detail_text.length();
-              }
-              std::wstring line =
-                  detail_text.substr(line_start, line_end - line_start);
-
-              size_t colon_pos = line.find(L'：');
-              if (colon_pos == std::wstring::npos) {
-                colon_pos = line.find(L':');
-              }
-
-              if (colon_pos != std::wstring::npos && colon_pos > 0) {
-                // Key part
-                DWRITE_TEXT_RANGE key_range = {(UINT32)line_start,
-                                               (UINT32)(colon_pos + 1)};
-                pTextLayout->SetDrawingEffect(m_pKeyBrush.Get(), key_range);
-
-                // Value part
-                if (colon_pos + 1 < line.length()) {
-                  DWRITE_TEXT_RANGE val_range = {
-                      (UINT32)(line_start + colon_pos + 1),
-                      (UINT32)(line.length() - colon_pos - 1)};
-                  pTextLayout->SetFontWeight(DWRITE_FONT_WEIGHT_MEDIUM,
-                                             val_range);
-                }
-              }
-
-              line_start = line_end + 1;
-            }
-
-            // Markdown-style **text** uses the configured accent color. The
-            // markers have already been removed before layout and rendering.
+            // Do not infer a label from ':' or '：': legal prose regularly
+            // contains colons, and treating the first one as a field boundary
+            // incorrectly colors the preceding sentence.  Detail producers
+            // opt in to styling with explicit **text** markup instead.
+            // Markdown-style **text** uses the skin primary color or the
+            // dedicated emphasis override. The markers have already been
+            // removed before layout and rendering.
             for (const auto& range : parsed_detail.emphasis_ranges) {
               if (range.start >= detail_text.length()) {
                 continue;
@@ -659,7 +678,8 @@ void WeaselDetailPanel::_Render(const ParsedDetailPanelText& parsed_detail,
               const DWRITE_TEXT_RANGE emphasis_range = {
                   static_cast<UINT32>(range.start),
                   static_cast<UINT32>(safe_length)};
-              pTextLayout->SetDrawingEffect(m_pKeyBrush.Get(), emphasis_range);
+              pTextLayout->SetDrawingEffect(m_pEmphasisBrush.Get(),
+                                            emphasis_range);
               pTextLayout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD,
                                          emphasis_range);
             }
@@ -674,7 +694,7 @@ void WeaselDetailPanel::_Render(const ParsedDetailPanelText& parsed_detail,
                 std::vector<DWRITE_LINE_METRICS> lm(totalLineCount);
                 pTextLayout->GetLineMetrics(lm.data(), totalLineCount,
                                             &totalLineCount);
-                float curY = (float)(blurMarginY + padding_y);
+                float curY = text_origin_y;
                 float lineLeft = (float)(blurMarginX + padding_x);
                 float lineRight = lineLeft + max_text_width;
 
@@ -689,8 +709,7 @@ void WeaselDetailPanel::_Render(const ParsedDetailPanelText& parsed_detail,
             }
 
             m_pRenderTarget->DrawTextLayout(
-                D2D1::Point2F((float)(blurMarginX + padding_x),
-                              (float)(blurMarginY + padding_y)),
+                D2D1::Point2F((float)(blurMarginX + padding_x), text_origin_y),
                 pTextLayout.Get(), m_pBrush.Get(),
                 D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
             m_pRenderTarget->EndDraw();

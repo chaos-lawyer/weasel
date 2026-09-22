@@ -58,6 +58,16 @@ struct ParsedDetailPanelText {
   std::vector<DetailPanelTextRange> emphasis_ranges;
 };
 
+// DirectWrite reports the visible text bounds relative to the layout origin.
+// Center those bounds, rather than the line box, so equal configured padding
+// also appears equal above and below glyphs with different
+// ascenders/descenders.
+inline float CalculateDetailPanelTextOriginY(float content_height,
+                                             float text_top,
+                                             float text_height) {
+  return (content_height - text_height) / 2.0f - text_top;
+}
+
 /**
  * Parse the lightweight detail-panel markup. Paired Markdown-style ** markers
  * are removed and the enclosed text is returned as an emphasis range.
@@ -114,6 +124,22 @@ inline DetailPanelPosition ResolveDetailPanelPosition(
     return preferred_position;
   return is_vertical_layout ? DetailPanelPosition::Right
                             : DetailPanelPosition::Bottom;
+}
+
+// Return the actual horizontal side occupied by a rendered detail panel.
+// If the panel overlaps the candidate window because both sides are too narrow,
+// preserve the caller's preference instead of inventing a new direction.
+inline DetailPanelPosition DetectDetailPanelHorizontalSide(
+    const DetailPanelRect& candidate_window_rect,
+    const DetailPanelRect& detail_panel_rect,
+    DetailPanelPosition fallback) {
+  if (detail_panel_rect.right <= candidate_window_rect.left) {
+    return DetailPanelPosition::Left;
+  }
+  if (detail_panel_rect.left >= candidate_window_rect.right) {
+    return DetailPanelPosition::Right;
+  }
+  return fallback;
 }
 
 inline const char* DetailPanelPositionToString(DetailPanelPosition pos) {

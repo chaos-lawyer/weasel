@@ -37,6 +37,7 @@ class WeaselDetailPanel
   void Update(const std::wstring& detail_text,
               int candidate_index,
               const CRect& rcCandidate,
+              int width_override,
               const PDWR& pdwr);
   void Reposition(const CRect& rcCandidate);
   void Show();
@@ -70,10 +71,13 @@ class WeaselDetailPanel
   int m_current_content_width = 0;
   int m_current_content_height = 0;
   DetailPanelRect m_current_pos;
+  // In an auto-positioned vertical candidate session, retain the first usable
+  // side so selecting another candidate cannot make the panel oscillate.
+  DetailPanelPosition m_locked_vertical_side = DetailPanelPosition::Auto;
 
   ComPtr<ID2D1DCRenderTarget> m_pRenderTarget;
   ComPtr<ID2D1SolidColorBrush> m_pBrush;
-  ComPtr<ID2D1SolidColorBrush> m_pKeyBrush;
+  ComPtr<ID2D1SolidColorBrush> m_pEmphasisBrush;
   ComPtr<ID2D1SolidColorBrush> m_pSeparatorBrush;
 };
 
