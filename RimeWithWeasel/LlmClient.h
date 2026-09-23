@@ -17,7 +17,7 @@ InputPaths ParseInput(const std::string& raw_input,
                       const std::string& configured_scheme);
 std::vector<std::wstring> RequestCandidates(const std::wstring& base_url,
                                             const std::wstring& model,
-                                            const std::wstring& api_key_env,
+                                            const std::wstring& api_key,
                                             const std::wstring& context,
                                             const InputPaths& input,
                                             int timeout_ms,

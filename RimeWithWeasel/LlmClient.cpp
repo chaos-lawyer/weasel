@@ -165,18 +165,6 @@ std::string JsonString(const std::string& value) {
   return out.str();
 }
 
-std::wstring ReadEnv(const std::wstring& name) {
-  DWORD size = GetEnvironmentVariableW(name.c_str(), nullptr, 0);
-  if (!size || size > 8192)
-    return {};
-  std::wstring value(size, L'\0');
-  DWORD read = GetEnvironmentVariableW(name.c_str(), &value[0], size);
-  if (!read || read >= size)
-    return {};
-  value.resize(read);
-  return value;
-}
-
 std::vector<std::wstring> ParseResponse(const std::string& body, int limit) {
   std::vector<std::wstring> result;
   try {
@@ -284,7 +272,7 @@ InputPaths ParseInput(const std::string& raw_input,
 
 std::vector<std::wstring> RequestCandidates(const std::wstring& base_url,
                                             const std::wstring& model,
-                                            const std::wstring& api_key_env,
+                                            const std::wstring& api_key,
                                             const std::wstring& context,
                                             const InputPaths& input,
                                             int timeout_ms,
@@ -307,8 +295,7 @@ std::vector<std::wstring> RequestCandidates(const std::wstring& base_url,
       g_cache.erase(cached);
     }
   }
-  std::wstring key = ReadEnv(api_key_env);
-  if (key.empty() || base_url.empty() || model.empty())
+  if (api_key.empty() || base_url.empty() || model.empty())
     return empty;
   std::wstring url = base_url;
   while (!url.empty() && url.back() == L'/')
@@ -381,7 +368,7 @@ std::vector<std::wstring> RequestCandidates(const std::wstring& base_url,
       JsonString(system_prompt) +
       "},{\"role\":\"user\",\"content\":" + JsonString(user_data) + "}]}";
   std::wstring headers =
-      L"Content-Type: application/json\r\nAuthorization: Bearer " + key +
+      L"Content-Type: application/json\r\nAuthorization: Bearer " + api_key +
       L"\r\n";
   bool sent = WinHttpSendRequest(request, headers.c_str(),
                                  static_cast<DWORD>(headers.size()),
