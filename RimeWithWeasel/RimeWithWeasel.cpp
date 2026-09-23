@@ -711,12 +711,9 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
           session_status.llm_context_enabled =
               _LlmBool(text_config, "context_enabled", true);
           session_status.llm_context_chars =
-              (std::max)(0, (std::min)(2000, _LlmInt(text_config,
-                                                     "context_chars", 500)));
-          session_status.llm_boundary_search_chars =
-              (std::max)(0, (std::min)(500,
-                                       _LlmInt(text_config,
-                                               "boundary_search_chars", 100)));
+              std::clamp(_LlmInt(text_config, "context_chars", 500), 0, 2000);
+          session_status.llm_boundary_search_chars = std::clamp(
+              _LlmInt(text_config, "boundary_search_chars", 100), 0, 500);
           session_status.llm_request_pending = true;
           if (!same_request)
             session_status.llm_request_submitted = false;
@@ -880,8 +877,7 @@ void RimeWithWeaselHandler::SubmitLlmContext(WeaselSessionId ipc_id,
       _LlmValue(text_config, "ai_continuation_comment",
                 has_legacy_comment ? legacy_comment : "✦ AI续写");
   const int continuation_count =
-      (std::max)(0,
-                 (std::min)(5, _LlmInt(text_config, "continuation_count", 2)));
+      std::clamp(_LlmInt(text_config, "continuation_count", 2), 0, 5);
 
   std::string prompt_both =
       _DecodePromptEscapes(_LlmValue(text_config, "prompt_both"));
@@ -906,18 +902,20 @@ void RimeWithWeaselHandler::SubmitLlmContext(WeaselSessionId ipc_id,
         "和输入的自然语言后续扩展续写）。只返回纯 JSON。";
   }
   const int timeout_ms =
-      (std::max)(500,
-                 (std::min)(30000, _LlmInt(text_config, "timeout_ms", 3000)));
+      std::clamp(_LlmInt(text_config, "timeout_ms", 3000), 500, 30000);
   const int candidate_count =
-      (std::max)(1, (std::min)(10, _LlmInt(text_config, "candidate_count", 5)));
+      std::clamp(_LlmInt(text_config, "candidate_count", 5), 1, 10);
   const bool cache_enabled = _LlmBool(text_config, "cache_enabled", true);
+  const int configured_cache_ttl =
+      _LlmInt(text_config, "cache_ttl_seconds", 300);
   const int cache_ttl_seconds =
-      (std::max)(0, _LlmInt(text_config, "cache_ttl_seconds", 300));
+      configured_cache_ttl < 0 ? 0 : configured_cache_ttl;
+  const int configured_cache_max_entries =
+      _LlmInt(text_config, "cache_max_entries", 500);
   const int cache_max_entries =
-      (std::max)(0, _LlmInt(text_config, "cache_max_entries", 500));
+      configured_cache_max_entries < 0 ? 0 : configured_cache_max_entries;
   const double temperature =
-      (std::max)(0.0,
-                 (std::min)(2.0, _LlmDouble(text_config, "temperature", 0.0)));
+      std::clamp(_LlmDouble(text_config, "temperature", 0.0), 0.0, 2.0);
   const bool show_ai_comment =
       _LlmBool(text_config, "ai_comment_enabled", true);
 
