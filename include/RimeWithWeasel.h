@@ -37,12 +37,12 @@ struct SessionStatus {
         session_id(0),
         llm_generation(0),
         llm_context_enabled(false),
-        llm_context_chars(500),
-        llm_boundary_search_chars(100),
+        llm_context_chars(0),
+        llm_boundary_search_chars(0),
         llm_request_pending(false),
         llm_request_submitted(false),
-        llm_ai_comment_enabled(true),
-        llm_ai_comment(L"✦ AI") {
+        llm_ai_comment_enabled(false),
+        llm_ai_comment() {
     RIME_STRUCT(RimeStatus, status);
   }
   weasel::UIStyle style;

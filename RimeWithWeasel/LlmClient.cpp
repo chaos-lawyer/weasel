@@ -270,32 +270,39 @@ InputPaths ParseInput(const std::string& raw_input,
   return paths;
 }
 
-std::vector<std::wstring> RequestCandidates(const std::wstring& base_url,
-                                            const std::wstring& model,
-                                            const std::wstring& api_key,
-                                            const std::wstring& context,
-                                            const InputPaths& input,
-                                            int timeout_ms,
-                                            int candidate_count,
-                                            bool cache_enabled,
-                                            int cache_ttl_seconds,
-                                            int cache_max_entries) {
+std::vector<std::wstring> RequestCandidates(
+    const std::wstring& base_url,
+    const std::wstring& model,
+    const std::wstring& api_key,
+    const std::wstring& prompt_both,
+    const std::wstring& prompt_initials_only,
+    const std::wstring& context,
+    const InputPaths& input,
+    int timeout_ms,
+    double temperature,
+    int candidate_count,
+    bool cache_enabled,
+    int cache_ttl_seconds,
+    int cache_max_entries) {
   std::vector<std::wstring> empty;
-  const std::string cache_key = Utf8(base_url) + "\n" + Utf8(model) + "\n" +
-                                input.schema_id + "\n" + input.raw_input +
-                                "\n" + input.phonetic + "\n" + input.initials +
-                                "\n" + Utf8(context);
+  const std::string cache_key =
+      Utf8(base_url) + "\n" + Utf8(model) + "\n" + Utf8(prompt_both) + "\n" +
+      Utf8(prompt_initials_only) + "\n" + std::to_string(temperature) + "\n" +
+      std::to_string(candidate_count) + "\n" + input.schema_id + "\n" +
+      input.raw_input + "\n" + input.phonetic + "\n" + input.initials + "\n" +
+      Utf8(context);
   if (cache_enabled) {
     std::lock_guard<std::mutex> lock(g_cache_mutex);
     auto cached = g_cache.find(cache_key);
     if (cached != g_cache.end()) {
       const auto age = std::chrono::steady_clock::now() - cached->second.first;
-      if (age <= std::chrono::seconds(max(0, cache_ttl_seconds)))
+      if (age <= std::chrono::seconds(cache_ttl_seconds))
         return cached->second.second;
       g_cache.erase(cached);
     }
   }
-  if (api_key.empty() || base_url.empty() || model.empty())
+  if (api_key.empty() || base_url.empty() || model.empty() ||
+      prompt_both.empty() || prompt_initials_only.empty())
     return empty;
   std::wstring url = base_url;
   while (!url.empty() && url.back() == L'/')
@@ -326,7 +333,6 @@ std::vector<std::wstring> RequestCandidates(const std::wstring& base_url,
                   WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
   if (!session)
     return empty;
-  timeout_ms = max(500, min(15000, timeout_ms));
   WinHttpSetTimeouts(session, timeout_ms, timeout_ms, timeout_ms, timeout_ms);
   HINTERNET connection = WinHttpConnect(session, host.c_str(), parts.nPort, 0);
   HINTERNET request =
@@ -348,22 +354,12 @@ std::vector<std::wstring> RequestCandidates(const std::wstring& base_url,
       ",\"raw_input\":" + JsonString(input.raw_input) + ",\"phonetic\":" +
       (input.has_phonetic ? JsonString(input.phonetic) : "null") +
       ",\"initials\":" + JsonString(input.initials) + "}";
-  std::string system_prompt =
-      input.has_phonetic
-          ? "你是中文输入法候选生成器。raw_input "
-            "仅供调试，不得据此推导小鹤键位。结合光标前文本，在 phonetic 和 "
-            "initials "
-            "两种本地解析中消歧，生成最多五个符合编码的中文候选。不要解释，只返"
-            "回 JSON 对象 {\\\"candidates\\\":[\\\"候选\\\"]}。"
-          : "你是中文输入法候选生成器。raw_input "
-            "仅供调试，不得据此推导键位；本次只有 initials "
-            "是有效输入解释。initials "
-            "已由本地标准化。结合光标前文本生成最多五个符合 initials "
-            "的中文候选。不要解释，只返回 JSON 对象 "
-            "{\\\"candidates\\\":[\\\"候选\\\"]}。";
+  const std::string system_prompt =
+      Utf8(input.has_phonetic ? prompt_both : prompt_initials_only);
   std::string body =
       "{\"model\":" + JsonString(Utf8(model)) +
-      ",\"temperature\":0,\"response_format\":{\"type\":\"json_object\"},"
+      ",\"temperature\":" + std::to_string(temperature) +
+      ",\"response_format\":{\"type\":\"json_object\"},"
       "\"messages\":[{\"role\":\"system\",\"content\":" +
       JsonString(system_prompt) +
       "},{\"role\":\"user\",\"content\":" + JsonString(user_data) + "}]}";
@@ -402,9 +398,7 @@ std::vector<std::wstring> RequestCandidates(const std::wstring& base_url,
   WinHttpCloseHandle(connection);
   WinHttpCloseHandle(session);
   auto candidates =
-      response.empty()
-          ? empty
-          : ParseResponse(response, max(1, min(5, candidate_count)));
+      response.empty() ? empty : ParseResponse(response, candidate_count);
   if (cache_enabled && !candidates.empty() && cache_max_entries > 0) {
     std::lock_guard<std::mutex> lock(g_cache_mutex);
     while (static_cast<int>(g_cache.size()) >= cache_max_entries)

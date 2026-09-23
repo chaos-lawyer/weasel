@@ -120,18 +120,47 @@ static std::map<std::string, std::string> _ReadLlmTextConfig() {
 }
 
 static std::string _LlmValue(const std::map<std::string, std::string>& values,
-                             const char* key,
-                             const char* fallback) {
+                             const char* key) {
   auto it = values.find(key);
-  return it == values.end() ? fallback : it->second;
+  return it == values.end() ? std::string() : it->second;
+}
+
+static std::string _DecodePromptEscapes(const std::string& value) {
+  std::string result;
+  result.reserve(value.size());
+  for (size_t i = 0; i < value.size(); ++i) {
+    if (value[i] != '\\' || i + 1 >= value.size()) {
+      result.push_back(value[i]);
+      continue;
+    }
+    const char next = value[++i];
+    switch (next) {
+      case 'n':
+        result.push_back('\n');
+        break;
+      case 'r':
+        result.push_back('\r');
+        break;
+      case 't':
+        result.push_back('\t');
+        break;
+      case '\\':
+        result.push_back('\\');
+        break;
+      default:
+        result.push_back('\\');
+        result.push_back(next);
+        break;
+    }
+  }
+  return result;
 }
 
 static bool _LlmBool(const std::map<std::string, std::string>& values,
-                     const char* key,
-                     bool fallback) {
+                     const char* key) {
   auto it = values.find(key);
   if (it == values.end())
-    return fallback;
+    return false;
   std::string value = it->second;
   std::transform(value.begin(), value.end(), value.begin(),
                  [](unsigned char c) { return static_cast<char>(tolower(c)); });
@@ -139,18 +168,77 @@ static bool _LlmBool(const std::map<std::string, std::string>& values,
 }
 
 static int _LlmInt(const std::map<std::string, std::string>& values,
-                   const char* key,
-                   int fallback) {
+                   const char* key) {
   auto it = values.find(key);
   if (it == values.end())
-    return fallback;
+    return -1;
   try {
     size_t consumed = 0;
     int value = std::stoi(it->second, &consumed);
-    return consumed == it->second.size() ? value : fallback;
+    return consumed == it->second.size() ? value : -1;
   } catch (...) {
-    return fallback;
+    return -1;
   }
+}
+
+static double _LlmDouble(const std::map<std::string, std::string>& values,
+                         const char* key) {
+  auto it = values.find(key);
+  if (it == values.end())
+    return -1.0;
+  try {
+    size_t consumed = 0;
+    double value = std::stod(it->second, &consumed);
+    return consumed == it->second.size() ? value : -1.0;
+  } catch (...) {
+    return -1.0;
+  }
+}
+
+static bool _HasLlmTextConfig(
+    const std::map<std::string, std::string>& values) {
+  static const char* const required[] = {
+      "enabled",           "base_url",
+      "api_key",           "model",
+      "input_scheme",      "context_enabled",
+      "context_chars",     "boundary_search_chars",
+      "candidate_count",   "timeout_ms",
+      "temperature",       "ai_comment_enabled",
+      "ai_comment_text",   "cache_enabled",
+      "cache_ttl_seconds", "cache_max_entries",
+      "prompt_both",       "prompt_initials_only"};
+  for (const auto* key : required) {
+    if (values.find(key) == values.end())
+      return false;
+  }
+  const auto is_bool = [&values](const char* key) {
+    std::string value = values.at(key);
+    std::transform(
+        value.begin(), value.end(), value.begin(),
+        [](unsigned char c) { return static_cast<char>(tolower(c)); });
+    return value == "1" || value == "0" || value == "true" ||
+           value == "false" || value == "yes" || value == "no" ||
+           value == "on" || value == "off";
+  };
+  const auto scheme = values.at("input_scheme");
+  const int context_chars = _LlmInt(values, "context_chars");
+  const int boundary_chars = _LlmInt(values, "boundary_search_chars");
+  const int candidates = _LlmInt(values, "candidate_count");
+  const int timeout = _LlmInt(values, "timeout_ms");
+  const int ttl = _LlmInt(values, "cache_ttl_seconds");
+  const int cache_entries = _LlmInt(values, "cache_max_entries");
+  const double temperature = _LlmDouble(values, "temperature");
+  return is_bool("enabled") && is_bool("context_enabled") &&
+         is_bool("ai_comment_enabled") && is_bool("cache_enabled") &&
+         !values.at("base_url").empty() && !values.at("api_key").empty() &&
+         !values.at("model").empty() &&
+         (scheme == "auto" || scheme == "xiaohe" || scheme == "quanpin") &&
+         context_chars >= 0 && context_chars <= 2000 && boundary_chars >= 0 &&
+         boundary_chars <= 500 && candidates >= 1 && candidates <= 5 &&
+         timeout >= 500 && timeout <= 15000 && ttl >= 0 && cache_entries >= 0 &&
+         temperature >= 0.0 && temperature <= 2.0 &&
+         !values.at("prompt_both").empty() &&
+         !values.at("prompt_initials_only").empty();
 }
 
 WeaselSessionId _GenerateNewWeaselSessionId(SessionStatusMap sm, DWORD pid) {
@@ -611,31 +699,10 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
                                sizeof(raw_input))) {
       rime_api->set_property(session_id, "llm_trigger", "");
       RIME_STRUCT(RimeStatus, status);
-      RimeConfig schema_config = {nullptr};
-      if (rime_api->get_status(session_id, &status) && status.schema_id &&
-          rime_api->schema_open(status.schema_id, &schema_config)) {
+      if (rime_api->get_status(session_id, &status) && status.schema_id) {
         const auto text_config = _ReadLlmTextConfig();
-        Bool enabled = False;
-        Bool context_enabled = True;
-        int context_chars = 500;
-        int boundary_search_chars = 100;
-        rime_api->config_get_bool(&schema_config, "llm/enabled", &enabled);
-        rime_api->config_get_bool(&schema_config, "llm/context_enabled",
-                                  &context_enabled);
-        rime_api->config_get_int(&schema_config, "llm/context_chars",
-                                 &context_chars);
-        rime_api->config_get_int(&schema_config, "llm/boundary_search_chars",
-                                 &boundary_search_chars);
-        const bool configured =
-            _LlmBool(text_config, "enabled", !!enabled) &&
-            !_LlmValue(text_config, "base_url", "").empty() &&
-            !_LlmValue(text_config, "model", "").empty();
-        context_enabled =
-            _LlmBool(text_config, "context_enabled", !!context_enabled);
-        context_chars = _LlmInt(text_config, "context_chars", context_chars);
-        boundary_search_chars = _LlmInt(text_config, "boundary_search_chars",
-                                        boundary_search_chars);
-        if (configured) {
+        if (_HasLlmTextConfig(text_config) &&
+            _LlmBool(text_config, "enabled")) {
           const bool same_request =
               session_status.llm_raw_input == raw_input &&
               session_status.llm_schema_id == status.schema_id &&
@@ -645,15 +712,16 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
               std::to_wstring(session_status.llm_generation);
           session_status.llm_raw_input = raw_input;
           session_status.llm_schema_id = status.schema_id;
-          session_status.llm_context_enabled = !!context_enabled;
-          session_status.llm_context_chars = max(0, min(2000, context_chars));
+          session_status.llm_context_enabled =
+              _LlmBool(text_config, "context_enabled");
+          session_status.llm_context_chars =
+              _LlmInt(text_config, "context_chars");
           session_status.llm_boundary_search_chars =
-              max(0, min(500, boundary_search_chars));
+              _LlmInt(text_config, "boundary_search_chars");
           session_status.llm_request_pending = true;
           if (!same_request)
             session_status.llm_request_submitted = false;
         }
-        rime_api->config_close(&schema_config);
       }
       rime_api->free_status(&status);
     }
@@ -793,57 +861,25 @@ void RimeWithWeaselHandler::SubmitLlmContext(WeaselSessionId ipc_id,
   if (session_status.llm_request_submitted)
     return;
   const auto text_config = _ReadLlmTextConfig();
-  RimeConfig config = {nullptr};
-  if (!rime_api->schema_open(session_status.llm_schema_id.c_str(), &config))
+  if (!_HasLlmTextConfig(text_config) || !_LlmBool(text_config, "enabled"))
     return;
-  char schema_base_url[1024] = {0};
-  char schema_model[256] = {0};
-  char input_scheme[32] = {0};
-  int timeout_ms = 3000;
-  int candidate_count = 5;
-  Bool cache_enabled = True;
-  int cache_ttl_seconds = 300;
-  int cache_max_entries = 500;
-  rime_api->config_get_string(&config, "llm/base_url", schema_base_url,
-                              sizeof(schema_base_url));
-  rime_api->config_get_string(&config, "llm/model", schema_model,
-                              sizeof(schema_model));
-  rime_api->config_get_string(&config, "llm/input_scheme", input_scheme,
-                              sizeof(input_scheme));
-  Bool show_ai_comment = True;
-  char ai_comment[128] = {0};
-  rime_api->config_get_bool(&config, "llm/ai_comment/enabled",
-                            &show_ai_comment);
-  rime_api->config_get_string(&config, "llm/ai_comment/text", ai_comment,
-                              sizeof(ai_comment));
-  rime_api->config_get_int(&config, "llm/timeout_ms", &timeout_ms);
-  rime_api->config_get_int(&config, "llm/candidate_count", &candidate_count);
-  rime_api->config_get_bool(&config, "llm/cache/enabled", &cache_enabled);
-  rime_api->config_get_int(&config, "llm/cache/ttl_seconds",
-                           &cache_ttl_seconds);
-  rime_api->config_get_int(&config, "llm/cache/max_entries",
-                           &cache_max_entries);
-  rime_api->config_close(&config);
-  const std::string base_url =
-      _LlmValue(text_config, "base_url", schema_base_url);
-  const std::string model = _LlmValue(text_config, "model", schema_model);
-  const std::string api_key = _LlmValue(text_config, "api_key", "");
-  const std::string configured_scheme =
-      _LlmValue(text_config, "input_scheme", input_scheme);
+  const std::string base_url = _LlmValue(text_config, "base_url");
+  const std::string model = _LlmValue(text_config, "model");
+  const std::string api_key = _LlmValue(text_config, "api_key");
+  const std::string configured_scheme = _LlmValue(text_config, "input_scheme");
   const std::string configured_comment =
-      _LlmValue(text_config, "ai_comment_text", ai_comment);
-  const bool llm_enabled = _LlmBool(text_config, "enabled", true);
-  timeout_ms = _LlmInt(text_config, "timeout_ms", timeout_ms);
-  candidate_count = _LlmInt(text_config, "candidate_count", candidate_count);
-  cache_enabled = _LlmBool(text_config, "cache_enabled", !!cache_enabled);
-  cache_ttl_seconds =
-      _LlmInt(text_config, "cache_ttl_seconds", cache_ttl_seconds);
-  cache_max_entries =
-      _LlmInt(text_config, "cache_max_entries", cache_max_entries);
-  show_ai_comment =
-      _LlmBool(text_config, "ai_comment_enabled", !!show_ai_comment);
-  if (!llm_enabled || base_url.empty() || model.empty() || api_key.empty())
-    return;
+      _LlmValue(text_config, "ai_comment_text");
+  const std::string prompt_both =
+      _DecodePromptEscapes(_LlmValue(text_config, "prompt_both"));
+  const std::string prompt_initials_only =
+      _DecodePromptEscapes(_LlmValue(text_config, "prompt_initials_only"));
+  const int timeout_ms = _LlmInt(text_config, "timeout_ms");
+  const int candidate_count = _LlmInt(text_config, "candidate_count");
+  const bool cache_enabled = _LlmBool(text_config, "cache_enabled");
+  const int cache_ttl_seconds = _LlmInt(text_config, "cache_ttl_seconds");
+  const int cache_max_entries = _LlmInt(text_config, "cache_max_entries");
+  const double temperature = _LlmDouble(text_config, "temperature");
+  const bool show_ai_comment = _LlmBool(text_config, "ai_comment_enabled");
 
   const DWORD ipc_id_snapshot = ipc_id;
   const std::wstring request_snapshot = request_id;
@@ -851,13 +887,12 @@ void RimeWithWeaselHandler::SubmitLlmContext(WeaselSessionId ipc_id,
   const std::wstring context_snapshot = session_status.llm_context_enabled
                                             ? session_status.llm_context
                                             : std::wstring();
-  const auto input_snapshot = weasel_llm::ParseInput(
-      session_status.llm_raw_input, session_status.llm_schema_id,
-      configured_scheme.empty() ? "auto" : configured_scheme);
+  const auto input_snapshot =
+      weasel_llm::ParseInput(session_status.llm_raw_input,
+                             session_status.llm_schema_id, configured_scheme);
   session_status.llm_request_submitted = true;
   session_status.llm_ai_comment_enabled = !!show_ai_comment;
-  if (!configured_comment.empty())
-    session_status.llm_ai_comment = u8tow(configured_comment.c_str());
+  session_status.llm_ai_comment = u8tow(configured_comment.c_str());
   session_status.llm_context = context_snapshot;
   auto worker_it = m_llm_workers.begin();
   while (worker_it != m_llm_workers.end()) {
@@ -875,15 +910,18 @@ void RimeWithWeaselHandler::SubmitLlmContext(WeaselSessionId ipc_id,
   try {
     m_llm_workers.back().thread = std::thread(
         [this, done, ipc_id_snapshot, request_snapshot, generation_snapshot,
-         context_snapshot, input_snapshot, base_url, model, api_key, timeout_ms,
+         context_snapshot, input_snapshot, base_url, model, api_key,
+         prompt_both, prompt_initials_only, timeout_ms, temperature,
          candidate_count, cache_enabled = !!cache_enabled, cache_ttl_seconds,
          cache_max_entries]() {
           try {
             std::vector<std::wstring> candidates;
             candidates = weasel_llm::RequestCandidates(
-                u8tow(base_url), u8tow(model), u8tow(api_key), context_snapshot,
-                input_snapshot, timeout_ms, candidate_count, cache_enabled,
-                cache_ttl_seconds, cache_max_entries);
+                u8tow(base_url), u8tow(model), u8tow(api_key),
+                u8tow(prompt_both), u8tow(prompt_initials_only),
+                context_snapshot, input_snapshot, timeout_ms, temperature,
+                candidate_count, cache_enabled, cache_ttl_seconds,
+                cache_max_entries);
             {
               std::lock_guard<std::mutex> lock(m_llm_results_mutex);
               m_llm_results.push_back({ipc_id_snapshot, request_snapshot,
