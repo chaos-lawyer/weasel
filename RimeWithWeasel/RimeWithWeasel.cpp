@@ -72,7 +72,7 @@ static DisplayPreedit _GetDisplayPreedit(RimeSessionId session_id,
 }
 
 static int _MapDisplayPreeditPosition(int position,
-                                     const DisplayPreedit& preedit) {
+                                      const DisplayPreedit& preedit) {
   if (position <= 0) {
     return 0;
   }
@@ -97,7 +97,7 @@ static std::string _TrimConfigValue(std::string value) {
 static std::map<std::string, std::string> _ReadLlmTextConfig() {
   std::map<std::string, std::string> values;
   std::ifstream file(WeaselUserDataPath() / L"dicts" / L"llm_config.txt",
-                    std::ios::binary);
+                     std::ios::binary);
   std::string line;
   while (std::getline(file, line)) {
     if (values.empty() && line.size() >= 3 &&
@@ -630,11 +630,11 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
             _LlmBool(text_config, "enabled", !!enabled) &&
             !_LlmValue(text_config, "base_url", "").empty() &&
             !_LlmValue(text_config, "model", "").empty();
-        context_enabled = _LlmBool(text_config, "context_enabled",
-                                   !!context_enabled);
+        context_enabled =
+            _LlmBool(text_config, "context_enabled", !!context_enabled);
         context_chars = _LlmInt(text_config, "context_chars", context_chars);
-        boundary_search_chars = _LlmInt(
-            text_config, "boundary_search_chars", boundary_search_chars);
+        boundary_search_chars = _LlmInt(text_config, "boundary_search_chars",
+                                        boundary_search_chars);
         if (configured) {
           const bool same_request =
               session_status.llm_raw_input == raw_input &&
