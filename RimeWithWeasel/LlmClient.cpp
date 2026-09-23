@@ -17,8 +17,8 @@
 
 namespace weasel_llm {
 namespace {
-using CachedResult =
-    std::pair<std::chrono::steady_clock::time_point, std::vector<std::wstring>>;
+using CachedResult = std::pair<std::chrono::steady_clock::time_point,
+                               std::vector<CandidateItem>>;
 std::mutex g_cache_mutex;
 std::map<std::string, CachedResult> g_cache;
 
@@ -165,8 +165,13 @@ std::string JsonString(const std::string& value) {
   return out.str();
 }
 
-std::vector<std::wstring> ParseResponse(const std::string& body, int limit) {
-  std::vector<std::wstring> result;
+static std::vector<CandidateItem> ParseResponse(
+    const std::string& body,
+    const std::wstring& default_predict_comment,
+    const std::wstring& default_continuation_comment,
+    int continuation_count,
+    int limit) {
+  std::vector<CandidateItem> result;
   try {
     std::stringstream stream(body);
     boost::property_tree::ptree root;
@@ -181,16 +186,92 @@ std::vector<std::wstring> ParseResponse(const std::string& body, int limit) {
     boost::property_tree::ptree parsed;
     boost::property_tree::read_json(json, parsed);
     std::set<std::wstring> seen;
-    for (const auto& item : parsed.get_child("candidates")) {
-      auto text = item.second.get_value<std::string>();
-      if (text.empty())
-        continue;
-      std::wstring candidate = Wide(text);
-      if (candidate.empty() || !seen.insert(candidate).second)
-        continue;
-      result.push_back(candidate);
-      if (static_cast<int>(result.size()) >= limit)
-        break;
+
+    const auto add_item = [&](const std::string& text_raw,
+                              const std::string& comment_raw,
+                              const std::wstring& fallback_comment) {
+      if (text_raw.empty())
+        return;
+      std::wstring text = Wide(text_raw);
+      if (text.empty() || !seen.insert(text).second)
+        return;
+      std::wstring comment =
+          comment_raw.empty() ? fallback_comment : Wide(comment_raw);
+      result.push_back({std::move(text), std::move(comment)});
+    };
+
+    auto predictions_opt = parsed.get_child_optional("predictions");
+    auto continuations_opt = parsed.get_child_optional("continuations");
+
+    if (predictions_opt || continuations_opt) {
+      if (predictions_opt) {
+        for (const auto& item : *predictions_opt) {
+          if (static_cast<int>(result.size()) >= limit)
+            break;
+          if (item.second.empty()) {
+            add_item(item.second.get_value<std::string>(), "",
+                     default_predict_comment);
+          } else {
+            add_item(item.second.get<std::string>("text", ""),
+                     item.second.get<std::string>("comment", ""),
+                     default_predict_comment);
+          }
+        }
+      }
+      if (continuations_opt) {
+        for (const auto& item : *continuations_opt) {
+          if (static_cast<int>(result.size()) >= limit)
+            break;
+          if (item.second.empty()) {
+            add_item(item.second.get_value<std::string>(), "",
+                     default_continuation_comment);
+          } else {
+            add_item(item.second.get<std::string>("text", ""),
+                     item.second.get<std::string>("comment", ""),
+                     default_continuation_comment);
+          }
+        }
+      }
+    } else {
+      auto candidates_opt = parsed.get_child_optional("candidates");
+      if (candidates_opt) {
+        std::vector<std::pair<std::string, std::string>> raw_items;
+        for (const auto& item : *candidates_opt) {
+          if (item.second.empty()) {
+            auto val = item.second.get_value<std::string>();
+            if (!val.empty())
+              raw_items.push_back({val, ""});
+          } else {
+            auto text = item.second.get<std::string>("text", "");
+            auto comment = item.second.get<std::string>("comment", "");
+            if (comment.empty()) {
+              auto type = item.second.get<std::string>("type", "");
+              if (type == "continuation") {
+                comment = Utf8(default_continuation_comment);
+              } else if (type == "prediction" || type == "predict") {
+                comment = Utf8(default_predict_comment);
+              }
+            }
+            if (!text.empty())
+              raw_items.push_back({text, comment});
+          }
+        }
+        const size_t total = raw_items.size();
+        const size_t continuation_start =
+            (continuation_count > 0 && total > 1)
+                ? (total > static_cast<size_t>(continuation_count)
+                       ? total - continuation_count
+                       : 1)
+                : total;
+        for (size_t i = 0; i < total; ++i) {
+          if (static_cast<int>(result.size()) >= limit)
+            break;
+          const std::wstring fallback = (i >= continuation_start)
+                                            ? default_continuation_comment
+                                            : default_predict_comment;
+          add_item(raw_items[i].first, raw_items[i].second, fallback);
+        }
+      }
     }
   } catch (...) {
     result.clear();
@@ -270,12 +351,15 @@ InputPaths ParseInput(const std::string& raw_input,
   return paths;
 }
 
-std::vector<std::wstring> RequestCandidates(
+std::vector<CandidateItem> RequestCandidates(
     const std::wstring& base_url,
     const std::wstring& model,
     const std::wstring& api_key,
     const std::wstring& prompt_both,
     const std::wstring& prompt_initials_only,
+    const std::wstring& default_predict_comment,
+    const std::wstring& default_continuation_comment,
+    int continuation_count,
     const std::wstring& context,
     const InputPaths& input,
     int timeout_ms,
@@ -284,11 +368,13 @@ std::vector<std::wstring> RequestCandidates(
     bool cache_enabled,
     int cache_ttl_seconds,
     int cache_max_entries) {
-  std::vector<std::wstring> empty;
+  std::vector<CandidateItem> empty;
   const std::string cache_key =
       Utf8(base_url) + "\n" + Utf8(model) + "\n" + Utf8(prompt_both) + "\n" +
-      Utf8(prompt_initials_only) + "\n" + std::to_string(temperature) + "\n" +
-      std::to_string(candidate_count) + "\n" + input.schema_id + "\n" +
+      Utf8(prompt_initials_only) + "\n" + Utf8(default_predict_comment) + "\n" +
+      Utf8(default_continuation_comment) + "\n" +
+      std::to_string(continuation_count) + "\n" + std::to_string(temperature) +
+      "\n" + std::to_string(candidate_count) + "\n" + input.schema_id + "\n" +
       input.raw_input + "\n" + input.phonetic + "\n" + input.initials + "\n" +
       Utf8(context);
   if (cache_enabled) {
@@ -397,8 +483,11 @@ std::vector<std::wstring> RequestCandidates(
   WinHttpCloseHandle(request);
   WinHttpCloseHandle(connection);
   WinHttpCloseHandle(session);
-  auto candidates =
-      response.empty() ? empty : ParseResponse(response, candidate_count);
+  auto candidates = response.empty()
+                        ? empty
+                        : ParseResponse(response, default_predict_comment,
+                                        default_continuation_comment,
+                                        continuation_count, candidate_count);
   if (cache_enabled && !candidates.empty() && cache_max_entries > 0) {
     std::lock_guard<std::mutex> lock(g_cache_mutex);
     while (static_cast<int>(g_cache.size()) >= cache_max_entries)

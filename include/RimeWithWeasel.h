@@ -28,6 +28,11 @@ typedef std::map<std::string, bool> AppOptions;
 typedef std::map<std::string, AppOptions, CaseInsensitiveCompare>
     AppOptionsByAppName;
 
+struct LlmCandidateItem {
+  std::wstring text;
+  std::wstring comment;
+};
+
 struct SessionStatus {
   SessionStatus()
       : style(weasel::UIStyle()),
@@ -54,6 +59,7 @@ struct SessionStatus {
   RimeSessionId session_id;
   uint64_t llm_generation;
   std::wstring llm_request_id;
+  std::wstring llm_config_path;
   std::string llm_raw_input;
   std::string llm_schema_id;
   bool llm_context_enabled;
@@ -64,7 +70,7 @@ struct SessionStatus {
   bool llm_ai_comment_enabled;
   std::wstring llm_ai_comment;
   std::wstring llm_context;
-  std::vector<std::wstring> llm_candidates;
+  std::vector<LlmCandidateItem> llm_candidates;
   std::wstring llm_commit_text;
 };
 typedef std::map<DWORD, SessionStatus> SessionStatusMap;
@@ -166,7 +172,7 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
     DWORD ipc_id;
     std::wstring request_id;
     uint64_t generation;
-    std::vector<std::wstring> candidates;
+    std::vector<LlmCandidateItem> candidates;
   };
   struct LlmWorker {
     std::thread thread;

@@ -94,10 +94,23 @@ static std::string _TrimConfigValue(std::string value) {
   return value.substr(first, last - first + 1);
 }
 
-static std::map<std::string, std::string> _ReadLlmTextConfig() {
+static std::filesystem::path _ResolveLlmConfigPath(
+    const std::wstring& custom_config_path) {
+  if (custom_config_path.empty()) {
+    return WeaselUserDataPath() / L"dicts" / L"llm_config.txt";
+  }
+  std::filesystem::path p(custom_config_path);
+  if (p.is_absolute()) {
+    return p;
+  }
+  return WeaselUserDataPath() / p;
+}
+
+static std::map<std::string, std::string> _ReadLlmTextConfig(
+    const std::wstring& custom_config_path = L"") {
   std::map<std::string, std::string> values;
-  std::ifstream file(WeaselUserDataPath() / L"dicts" / L"llm_config.txt",
-                     std::ios::binary);
+  const auto config_path = _ResolveLlmConfigPath(custom_config_path);
+  std::ifstream file(config_path, std::ios::binary);
   std::string line;
   while (std::getline(file, line)) {
     if (values.empty() && line.size() >= 3 &&
@@ -120,9 +133,10 @@ static std::map<std::string, std::string> _ReadLlmTextConfig() {
 }
 
 static std::string _LlmValue(const std::map<std::string, std::string>& values,
-                             const char* key) {
+                             const char* key,
+                             const std::string& default_val = "") {
   auto it = values.find(key);
-  return it == values.end() ? std::string() : it->second;
+  return it == values.end() ? default_val : it->second;
 }
 
 static std::string _DecodePromptEscapes(const std::string& value) {
@@ -157,88 +171,61 @@ static std::string _DecodePromptEscapes(const std::string& value) {
 }
 
 static bool _LlmBool(const std::map<std::string, std::string>& values,
-                     const char* key) {
+                     const char* key,
+                     bool default_val = false) {
   auto it = values.find(key);
   if (it == values.end())
-    return false;
+    return default_val;
   std::string value = it->second;
   std::transform(value.begin(), value.end(), value.begin(),
                  [](unsigned char c) { return static_cast<char>(tolower(c)); });
-  return value == "1" || value == "true" || value == "yes" || value == "on";
+  if (value == "1" || value == "true" || value == "yes" || value == "on")
+    return true;
+  if (value == "0" || value == "false" || value == "no" || value == "off")
+    return false;
+  return default_val;
 }
 
 static int _LlmInt(const std::map<std::string, std::string>& values,
-                   const char* key) {
+                   const char* key,
+                   int default_val = -1) {
   auto it = values.find(key);
   if (it == values.end())
-    return -1;
+    return default_val;
   try {
     size_t consumed = 0;
     int value = std::stoi(it->second, &consumed);
-    return consumed == it->second.size() ? value : -1;
+    return consumed == it->second.size() ? value : default_val;
   } catch (...) {
-    return -1;
+    return default_val;
   }
 }
 
 static double _LlmDouble(const std::map<std::string, std::string>& values,
-                         const char* key) {
+                         const char* key,
+                         double default_val = 0.0) {
   auto it = values.find(key);
   if (it == values.end())
-    return -1.0;
+    return default_val;
   try {
     size_t consumed = 0;
     double value = std::stod(it->second, &consumed);
-    return consumed == it->second.size() ? value : -1.0;
+    return consumed == it->second.size() ? value : default_val;
   } catch (...) {
-    return -1.0;
+    return default_val;
   }
 }
 
 static bool _HasLlmTextConfig(
     const std::map<std::string, std::string>& values) {
-  static const char* const required[] = {
-      "enabled",           "base_url",
-      "api_key",           "model",
-      "input_scheme",      "context_enabled",
-      "context_chars",     "boundary_search_chars",
-      "candidate_count",   "timeout_ms",
-      "temperature",       "ai_comment_enabled",
-      "ai_comment_text",   "cache_enabled",
-      "cache_ttl_seconds", "cache_max_entries",
-      "prompt_both",       "prompt_initials_only"};
-  for (const auto* key : required) {
-    if (values.find(key) == values.end())
-      return false;
+  if (!_LlmBool(values, "enabled", true))
+    return false;
+  if (_LlmValue(values, "base_url").empty() ||
+      _LlmValue(values, "api_key").empty() ||
+      _LlmValue(values, "model").empty()) {
+    return false;
   }
-  const auto is_bool = [&values](const char* key) {
-    std::string value = values.at(key);
-    std::transform(
-        value.begin(), value.end(), value.begin(),
-        [](unsigned char c) { return static_cast<char>(tolower(c)); });
-    return value == "1" || value == "0" || value == "true" ||
-           value == "false" || value == "yes" || value == "no" ||
-           value == "on" || value == "off";
-  };
-  const auto scheme = values.at("input_scheme");
-  const int context_chars = _LlmInt(values, "context_chars");
-  const int boundary_chars = _LlmInt(values, "boundary_search_chars");
-  const int candidates = _LlmInt(values, "candidate_count");
-  const int timeout = _LlmInt(values, "timeout_ms");
-  const int ttl = _LlmInt(values, "cache_ttl_seconds");
-  const int cache_entries = _LlmInt(values, "cache_max_entries");
-  const double temperature = _LlmDouble(values, "temperature");
-  return is_bool("enabled") && is_bool("context_enabled") &&
-         is_bool("ai_comment_enabled") && is_bool("cache_enabled") &&
-         !values.at("base_url").empty() && !values.at("api_key").empty() &&
-         !values.at("model").empty() &&
-         (scheme == "auto" || scheme == "xiaohe" || scheme == "quanpin") &&
-         context_chars >= 0 && context_chars <= 2000 && boundary_chars >= 0 &&
-         boundary_chars <= 500 && candidates >= 1 && candidates <= 5 &&
-         timeout >= 500 && timeout <= 15000 && ttl >= 0 && cache_entries >= 0 &&
-         temperature >= 0.0 && temperature <= 2.0 &&
-         !values.at("prompt_both").empty() &&
-         !values.at("prompt_initials_only").empty();
+  return true;
 }
 
 WeaselSessionId _GenerateNewWeaselSessionId(SessionStatusMap sm, DWORD pid) {
@@ -635,7 +622,7 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
         if (action == weasel::DynamicCandidateSelectAction::SelectCandidate) {
           if (selected_index < session_status.llm_candidates.size()) {
             session_status.llm_commit_text =
-                session_status.llm_candidates[selected_index];
+                session_status.llm_candidates[selected_index].text;
             rime_api->clear_composition(session_id);
             handled = True;
           } else {
@@ -662,7 +649,7 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
       const size_t selected = static_cast<size_t>(keyEvent.keycode - '1');
       if (selected < session_status.llm_candidates.size()) {
         session_status.llm_commit_text =
-            session_status.llm_candidates[selected];
+            session_status.llm_candidates[selected].text;
         rime_api->clear_composition(session_id);
         handled = True;
         custom_key_processed = true;
@@ -692,32 +679,42 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
   if (!(keyEvent.mask & ibus::Modifier::RELEASE_MASK)) {
     char trigger[8] = {0};
     char raw_input[256] = {0};
+    char config_path[1024] = {0};
     if (rime_api->get_property(session_id, "llm_trigger", trigger,
                                sizeof(trigger)) &&
         trigger[0] == '1' &&
         rime_api->get_property(session_id, "llm_raw_input", raw_input,
                                sizeof(raw_input))) {
       rime_api->set_property(session_id, "llm_trigger", "");
+      std::wstring custom_config_path;
+      if (rime_api->get_property(session_id, "llm_config_path", config_path,
+                                 sizeof(config_path)) &&
+          config_path[0] != '\0') {
+        custom_config_path = u8tow(config_path);
+      }
       RIME_STRUCT(RimeStatus, status);
       if (rime_api->get_status(session_id, &status) && status.schema_id) {
-        const auto text_config = _ReadLlmTextConfig();
+        const auto text_config = _ReadLlmTextConfig(custom_config_path);
         if (_HasLlmTextConfig(text_config) &&
-            _LlmBool(text_config, "enabled")) {
+            _LlmBool(text_config, "enabled", true)) {
           const bool same_request =
               session_status.llm_raw_input == raw_input &&
               session_status.llm_schema_id == status.schema_id &&
+              session_status.llm_config_path == custom_config_path &&
               !session_status.llm_request_id.empty();
+          session_status.llm_config_path = custom_config_path;
           session_status.llm_request_id =
               std::to_wstring(ipc_id) + L"-" +
               std::to_wstring(session_status.llm_generation);
           session_status.llm_raw_input = raw_input;
           session_status.llm_schema_id = status.schema_id;
           session_status.llm_context_enabled =
-              _LlmBool(text_config, "context_enabled");
-          session_status.llm_context_chars =
-              _LlmInt(text_config, "context_chars");
-          session_status.llm_boundary_search_chars =
-              _LlmInt(text_config, "boundary_search_chars");
+              _LlmBool(text_config, "context_enabled", true);
+          session_status.llm_context_chars = std::max(
+              0, std::min(2000, _LlmInt(text_config, "context_chars", 500)));
+          session_status.llm_boundary_search_chars = std::max(
+              0, std::min(500,
+                          _LlmInt(text_config, "boundary_search_chars", 100)));
           session_status.llm_request_pending = true;
           if (!same_request)
             session_status.llm_request_submitted = false;
@@ -785,7 +782,7 @@ void RimeWithWeaselHandler::SelectCandidateOnCurrentPage(
     return;
   SessionStatus& session_status = get_session_status(ipc_id);
   if (index < session_status.llm_candidates.size()) {
-    session_status.llm_commit_text = session_status.llm_candidates[index];
+    session_status.llm_commit_text = session_status.llm_candidates[index].text;
     rime_api->clear_composition(to_session_id(ipc_id));
     return;
   }
@@ -860,26 +857,64 @@ void RimeWithWeaselHandler::SubmitLlmContext(WeaselSessionId ipc_id,
       session_status.llm_context_enabled ? context : std::wstring();
   if (session_status.llm_request_submitted)
     return;
-  const auto text_config = _ReadLlmTextConfig();
-  if (!_HasLlmTextConfig(text_config) || !_LlmBool(text_config, "enabled"))
+  const auto text_config = _ReadLlmTextConfig(session_status.llm_config_path);
+  if (!_HasLlmTextConfig(text_config) ||
+      !_LlmBool(text_config, "enabled", true))
     return;
   const std::string base_url = _LlmValue(text_config, "base_url");
   const std::string model = _LlmValue(text_config, "model");
   const std::string api_key = _LlmValue(text_config, "api_key");
-  const std::string configured_scheme = _LlmValue(text_config, "input_scheme");
-  const std::string configured_comment =
-      _LlmValue(text_config, "ai_comment_text");
-  const std::string prompt_both =
+  const std::string configured_scheme =
+      _LlmValue(text_config, "input_scheme", "auto");
+
+  const std::string legacy_comment =
+      _LlmValue(text_config, "ai_comment_text", "✦ AI");
+  const bool has_legacy_comment =
+      text_config.find("ai_comment_text") != text_config.end();
+  const std::string predict_comment =
+      _LlmValue(text_config, "ai_predict_comment",
+                has_legacy_comment ? legacy_comment : "✦ AI预测");
+  const std::string continuation_comment =
+      _LlmValue(text_config, "ai_continuation_comment",
+                has_legacy_comment ? legacy_comment : "✦ AI续写");
+  const int continuation_count =
+      std::max(0, std::min(5, _LlmInt(text_config, "continuation_count", 2)));
+
+  std::string prompt_both =
       _DecodePromptEscapes(_LlmValue(text_config, "prompt_both"));
-  const std::string prompt_initials_only =
+  std::string prompt_initials_only =
       _DecodePromptEscapes(_LlmValue(text_config, "prompt_initials_only"));
-  const int timeout_ms = _LlmInt(text_config, "timeout_ms");
-  const int candidate_count = _LlmInt(text_config, "candidate_count");
-  const bool cache_enabled = _LlmBool(text_config, "cache_enabled");
-  const int cache_ttl_seconds = _LlmInt(text_config, "cache_ttl_seconds");
-  const int cache_max_entries = _LlmInt(text_config, "cache_max_entries");
-  const double temperature = _LlmDouble(text_config, "temperature");
-  const bool show_ai_comment = _LlmBool(text_config, "ai_comment_enabled");
+  if (prompt_both.empty()) {
+    prompt_both =
+        "你是中文输入法候选生成器，不是聊天助手。\n"
+        "用户本次输入只可能采用 phonetic 或 initials 中的一种。\n"
+        "请结合 context 语义，返回一个 JSON 对象，包含 predictions "
+        "数组（符合输入编码的精确匹配词句）"
+        "和 continuations 数组（结合 context "
+        "和输入的自然语言后续扩展续写）。只返回纯 JSON。";
+  }
+  if (prompt_initials_only.empty()) {
+    prompt_initials_only =
+        "你是中文输入法候选生成器，不是聊天助手。\n"
+        "本次只有 initials 是有效输入解释。\n"
+        "请结合 context 语义，返回一个 JSON 对象，包含 predictions 数组（符合 "
+        "initials 的精确匹配词句）"
+        "和 continuations 数组（结合 context "
+        "和输入的自然语言后续扩展续写）。只返回纯 JSON。";
+  }
+  const int timeout_ms =
+      std::max(500, std::min(30000, _LlmInt(text_config, "timeout_ms", 3000)));
+  const int candidate_count =
+      std::max(1, std::min(10, _LlmInt(text_config, "candidate_count", 5)));
+  const bool cache_enabled = _LlmBool(text_config, "cache_enabled", true);
+  const int cache_ttl_seconds =
+      std::max(0, _LlmInt(text_config, "cache_ttl_seconds", 300));
+  const int cache_max_entries =
+      std::max(0, _LlmInt(text_config, "cache_max_entries", 500));
+  const double temperature =
+      std::max(0.0, std::min(2.0, _LlmDouble(text_config, "temperature", 0.0)));
+  const bool show_ai_comment =
+      _LlmBool(text_config, "ai_comment_enabled", true);
 
   const DWORD ipc_id_snapshot = ipc_id;
   const std::wstring request_snapshot = request_id;
@@ -892,7 +927,7 @@ void RimeWithWeaselHandler::SubmitLlmContext(WeaselSessionId ipc_id,
                              session_status.llm_schema_id, configured_scheme);
   session_status.llm_request_submitted = true;
   session_status.llm_ai_comment_enabled = !!show_ai_comment;
-  session_status.llm_ai_comment = u8tow(configured_comment.c_str());
+  session_status.llm_ai_comment = u8tow(predict_comment.c_str());
   session_status.llm_context = context_snapshot;
   auto worker_it = m_llm_workers.begin();
   while (worker_it != m_llm_workers.end()) {
@@ -911,22 +946,30 @@ void RimeWithWeaselHandler::SubmitLlmContext(WeaselSessionId ipc_id,
     m_llm_workers.back().thread = std::thread(
         [this, done, ipc_id_snapshot, request_snapshot, generation_snapshot,
          context_snapshot, input_snapshot, base_url, model, api_key,
-         prompt_both, prompt_initials_only, timeout_ms, temperature,
+         prompt_both, prompt_initials_only, predict_comment,
+         continuation_comment, continuation_count, timeout_ms, temperature,
          candidate_count, cache_enabled = !!cache_enabled, cache_ttl_seconds,
          cache_max_entries]() {
           try {
-            std::vector<std::wstring> candidates;
+            std::vector<weasel_llm::CandidateItem> candidates;
             candidates = weasel_llm::RequestCandidates(
                 u8tow(base_url), u8tow(model), u8tow(api_key),
                 u8tow(prompt_both), u8tow(prompt_initials_only),
-                context_snapshot, input_snapshot, timeout_ms, temperature,
-                candidate_count, cache_enabled, cache_ttl_seconds,
-                cache_max_entries);
+                u8tow(predict_comment), u8tow(continuation_comment),
+                continuation_count, context_snapshot, input_snapshot,
+                timeout_ms, temperature, candidate_count, cache_enabled,
+                cache_ttl_seconds, cache_max_entries);
+            std::vector<LlmCandidateItem> converted;
+            converted.reserve(candidates.size());
+            for (auto& item : candidates) {
+              converted.push_back(
+                  {std::move(item.text), std::move(item.comment)});
+            }
             {
               std::lock_guard<std::mutex> lock(m_llm_results_mutex);
               m_llm_results.push_back({ipc_id_snapshot, request_snapshot,
                                        generation_snapshot,
-                                       std::move(candidates)});
+                                       std::move(converted)});
             }
             if (_AsyncRefreshCallback)
               _AsyncRefreshCallback(ipc_id_snapshot);
@@ -1121,10 +1164,11 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
     cinfo.comments.resize(count);
     cinfo.labels.resize(count);
     for (size_t i = 0; i < count; ++i) {
-      cinfo.candies[i].str = escape_string(llm_session->llm_candidates[i]);
-      cinfo.comments[i].str = llm_session->llm_ai_comment_enabled
-                                  ? escape_string(llm_session->llm_ai_comment)
-                                  : std::wstring();
+      cinfo.candies[i].str = escape_string(llm_session->llm_candidates[i].text);
+      cinfo.comments[i].str =
+          llm_session->llm_ai_comment_enabled
+              ? escape_string(llm_session->llm_candidates[i].comment)
+              : std::wstring();
       cinfo.labels[i].str = escape_string(weasel::FormatCandidateLabel(
           i, runtime_labels, runtime_keys, schema_select_labels,
           schema_select_keys));
