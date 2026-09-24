@@ -4,6 +4,9 @@
 
 void WeaselTSF::_ClearCompositionDisplayAttributes(TfEditCookie ec,
                                                    _In_ ITfContext* pContext) {
+  if (!_pComposition || !pContext)
+    return;
+
   ITfRange* pRangeComposition = nullptr;
   ITfProperty* pDisplayAttributeProperty = nullptr;
 

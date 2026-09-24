@@ -124,10 +124,17 @@ void WeaselTSF::_EndComposition(com_ptr<ITfContext> pContext,
   HRESULT hr;
   com_ptr<ITfComposition> pComposition = _pComposition;
 
+  if (!pContext && pComposition) {
+    com_ptr<ITfRange> pRange;
+    if (SUCCEEDED(pComposition->GetRange(&pRange)) && pRange) {
+      pRange->GetContext(&pContext);
+    }
+  }
+
   if (endUI)
     _cand->EndUI();
-  if ((pEditSession = new CEndCompositionEditSession(
-           this, pContext, pComposition, clear)) != NULL) {
+  if (pContext && (pEditSession = new CEndCompositionEditSession(
+                       this, pContext, pComposition, clear)) != NULL) {
     pContext->RequestEditSession(_tfClientId, pEditSession,
                                  TF_ES_ASYNCDONTCARE | TF_ES_READWRITE, &hr);
     pEditSession->Release();
@@ -403,6 +410,23 @@ STDMETHODIMP WeaselTSF::OnCompositionTerminated(TfEditCookie ecWrite,
   if (!_IsCurrentComposition(pComposition))
     return S_OK;
 
+  // In inline preedit mode, an external termination (such as switching window
+  // via Alt+Tab, mouse click away, or host app terminating composition) must
+  // clear the partially composed inline text so the host does not commit it.
+  if (_cand->style().inline_preedit) {
+    com_ptr<ITfRange> pRange;
+    if (pComposition && SUCCEEDED(pComposition->GetRange(&pRange)) && pRange) {
+      pRange->SetText(ecWrite, 0, L"", 0);
+      com_ptr<ITfContext> pContext;
+      if (SUCCEEDED(pRange->GetContext(&pContext)) && pContext) {
+        _ClearCompositionDisplayAttributes(ecWrite, pContext);
+      }
+    }
+    _FinalizeComposition();
+    _AbortComposition(false);
+    return S_OK;
+  }
+
   // A host may terminate the empty TSF composition used for a non-inline
   // preedit. Keep Rime's composing state; the next key will create a fresh
   // TSF composition. Only an inactive Rime session should be aborted here.
@@ -417,6 +441,7 @@ STDMETHODIMP WeaselTSF::OnCompositionTerminated(TfEditCookie ecWrite,
 
 void WeaselTSF::_AbortComposition(bool clear) {
   m_client.ClearComposition();
+  _status.composing = false;
   if (_IsComposing()) {
     _EndComposition(_pEditSessionContext, clear);
   }
