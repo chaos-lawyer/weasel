@@ -188,8 +188,26 @@ static LlmResponse ParseResponse(
       return response;
     }
 
-    std::string content =
-        root.get<std::string>("choices.0.message.content", "");
+    std::string content;
+    auto choices_opt = root.get_child_optional("choices");
+    if (choices_opt && !choices_opt->empty()) {
+      for (const auto& choice : *choices_opt) {
+        auto msg_opt = choice.second.get_child_optional("message");
+        if (msg_opt) {
+          content = msg_opt->get<std::string>("content", "");
+          if (content.empty()) {
+            content = msg_opt->get<std::string>("reasoning_content", "");
+          }
+          if (!content.empty())
+            break;
+        }
+        if (content.empty()) {
+          content = choice.second.get<std::string>("text", "");
+          if (!content.empty())
+            break;
+        }
+      }
+    }
     auto begin = content.find('{');
     auto end = content.rfind('}');
     if (begin == std::string::npos || end == std::string::npos || end < begin) {
