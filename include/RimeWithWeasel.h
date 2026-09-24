@@ -103,7 +103,9 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   virtual void FocusOut(DWORD param, WeaselSessionId ipc_id);
   virtual void SubmitLlmContext(WeaselSessionId ipc_id,
                                 const std::wstring& request_id,
-                                const std::wstring& context);
+                                const std::wstring& context,
+                                EatLine eat = 0);
+  virtual bool PollSession(WeaselSessionId ipc_id, EatLine eat = 0);
   virtual void RefreshSession(DWORD ipc_id);
   virtual void UpdateInputPosition(RECT const& rc, WeaselSessionId ipc_id);
   virtual void StartMaintenance();
@@ -147,6 +149,9 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
                                     weasel::KeyEvent& key_event);
 
   void _UpdateInlinePreeditStatus(WeaselSessionId ipc_id);
+  void _StartLlmWorker(SessionStatus& session_status,
+                       WeaselSessionId ipc_id,
+                       const std::wstring& context);
 
   RimeSessionId to_session_id(WeaselSessionId ipc_id) {
     return m_session_status_map[ipc_id].session_id;

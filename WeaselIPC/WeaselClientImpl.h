@@ -20,6 +20,7 @@ class ClientImpl {
   bool ProcessKeyEvent(KeyEvent const& keyEvent);
   bool SubmitLlmContext(const std::wstring& request_id,
                         const std::wstring& context);
+  bool PollSession();
   bool CommitComposition();
   bool ClearComposition();
   bool SelectCandidateOnCurrentPage(size_t index);

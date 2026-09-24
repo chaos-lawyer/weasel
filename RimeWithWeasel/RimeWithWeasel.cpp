@@ -769,6 +769,10 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
           session_status.llm_candidates = {{L"AI分析中...", L"✦ 请稍候"}};
           if (!same_request)
             session_status.llm_request_submitted = false;
+
+          if (!session_status.llm_context_enabled) {
+            _StartLlmWorker(session_status, ipc_id, L"");
+          }
         }
       }
       rime_api->free_status(&status);
@@ -909,25 +913,23 @@ void RimeWithWeaselHandler::FocusOut(DWORD param, WeaselSessionId ipc_id) {
   m_active_session = 0;
 }
 
-void RimeWithWeaselHandler::SubmitLlmContext(WeaselSessionId ipc_id,
-                                             const std::wstring& request_id,
-                                             const std::wstring& context) {
-  auto it = m_session_status_map.find(ipc_id);
-  if (it == m_session_status_map.end())
-    return;
-  SessionStatus& session_status = it->second;
-  if (request_id.empty() || request_id != session_status.llm_request_id ||
+void RimeWithWeaselHandler::_StartLlmWorker(SessionStatus& session_status,
+                                            WeaselSessionId ipc_id,
+                                            const std::wstring& context) {
+  if (session_status.llm_request_submitted ||
       session_status.llm_raw_input.empty()) {
     return;
   }
-  session_status.llm_context =
-      session_status.llm_context_enabled ? context : std::wstring();
-  if (session_status.llm_request_submitted)
-    return;
   const auto text_config = _ReadLlmTextConfig(session_status.llm_config_path);
   if (!_HasLlmTextConfig(text_config) ||
-      !_LlmBool(text_config, "enabled", true))
+      !_LlmBool(text_config, "enabled", true)) {
+    session_status.llm_loading = false;
+    session_status.llm_is_error = true;
+    session_status.llm_request_pending = false;
+    session_status.llm_request_submitted = true;
+    session_status.llm_candidates = {{L"AI 功能已禁用或配置无效", L"✦ 错误"}};
     return;
+  }
   const std::string base_url = _LlmValue(text_config, "base_url");
   const std::string model = _LlmValue(text_config, "model");
   const std::string api_key = _LlmValue(text_config, "api_key");
@@ -988,15 +990,15 @@ void RimeWithWeaselHandler::SubmitLlmContext(WeaselSessionId ipc_id,
       _LlmBool(text_config, "ai_comment_enabled", true);
 
   const DWORD ipc_id_snapshot = ipc_id;
-  const std::wstring request_snapshot = request_id;
+  const std::wstring request_snapshot = session_status.llm_request_id;
   const uint64_t generation_snapshot = session_status.llm_generation;
-  const std::wstring context_snapshot = session_status.llm_context_enabled
-                                            ? session_status.llm_context
-                                            : std::wstring();
+  const std::wstring context_snapshot =
+      session_status.llm_context_enabled ? context : std::wstring();
   const auto input_snapshot =
       weasel_llm::ParseInput(session_status.llm_raw_input,
                              session_status.llm_schema_id, configured_scheme);
   session_status.llm_request_submitted = true;
+  session_status.llm_request_pending = false;
   session_status.llm_ai_comment_enabled = !!show_ai_comment;
   session_status.llm_ai_comment = u8tow(predict_comment.c_str());
   session_status.llm_context = context_snapshot;
@@ -1056,6 +1058,37 @@ void RimeWithWeaselHandler::SubmitLlmContext(WeaselSessionId ipc_id,
     m_llm_workers.pop_back();
     session_status.llm_request_submitted = false;
   }
+}
+
+void RimeWithWeaselHandler::SubmitLlmContext(WeaselSessionId ipc_id,
+                                             const std::wstring& request_id,
+                                             const std::wstring& context,
+                                             EatLine eat) {
+  auto it = m_session_status_map.find(ipc_id);
+  if (it == m_session_status_map.end())
+    return;
+  SessionStatus& session_status = it->second;
+  if (request_id.empty() || request_id != session_status.llm_request_id ||
+      session_status.llm_raw_input.empty()) {
+    if (eat)
+      _Respond(ipc_id, eat);
+    return;
+  }
+  _StartLlmWorker(session_status, ipc_id, context);
+  if (eat)
+    _Respond(ipc_id, eat);
+}
+
+bool RimeWithWeaselHandler::PollSession(WeaselSessionId ipc_id, EatLine eat) {
+  auto it = m_session_status_map.find(ipc_id);
+  if (it != m_session_status_map.end()) {
+    SessionStatus& session_status = it->second;
+    if (session_status.llm_loading && !session_status.llm_request_submitted) {
+      _StartLlmWorker(session_status, ipc_id, L"");
+    }
+  }
+  _Respond(ipc_id, eat);
+  return true;
 }
 
 void RimeWithWeaselHandler::RefreshSession(DWORD ipc_id) {
@@ -1830,7 +1863,8 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
     rime_api->free_context(&ctx);
   }
 
-  if (session_status.llm_request_pending) {
+  if (session_status.llm_request_pending &&
+      !session_status.llm_request_submitted) {
     body.append(L"ctx.llm.request_id=")
         .append(escape_string(session_status.llm_request_id))
         .append(L"\n")
@@ -1843,7 +1877,6 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
         .append(L"ctx.llm.boundary_search_chars=")
         .append(std::to_wstring(session_status.llm_boundary_search_chars))
         .append(L"\n");
-    session_status.llm_request_pending = false;
   }
 
   // configuration information

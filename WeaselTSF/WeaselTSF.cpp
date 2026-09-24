@@ -317,9 +317,10 @@ void WeaselTSF::_OnLlmTimer(UINT_PTR timer_id) {
   if (timer_id != _llm_timer_id)
     return;
   ++_llm_poll_ticks;
-  if (_llm_poll_ticks > 50 || !_IsComposing() || !_pEditSessionContext) {
+  if (_llm_poll_ticks > 350 || !_IsComposing() || !_pEditSessionContext) {
     _StopLlmPolling();
     return;
   }
+  m_client.PollSession();
   _UpdateComposition(_pEditSessionContext);
 }

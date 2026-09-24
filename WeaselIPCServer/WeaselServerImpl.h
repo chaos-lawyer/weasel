@@ -81,6 +81,7 @@ class ServerImpl : public CWindowImpl<ServerImpl, CWindow, ServerWinTraits>
                                           DWORD lParam);
   DWORD OnChangePage(WEASEL_IPC_COMMAND uMsg, DWORD wParam, DWORD lParam);
   DWORD OnLlmContext(WEASEL_IPC_COMMAND uMsg, DWORD wParam, DWORD lParam);
+  DWORD OnPollSession(WEASEL_IPC_COMMAND uMsg, DWORD wParam, DWORD lParam);
 
  public:
   ServerImpl();

@@ -33,6 +33,7 @@ enum WEASEL_IPC_COMMAND {
   WEASEL_IPC_HIGHLIGHT_CANDIDATE_ON_CURRENT_PAGE,
   WEASEL_IPC_CHANGE_PAGE,
   WEASEL_IPC_LLM_CONTEXT,
+  WEASEL_IPC_POLL_SESSION,
   WEASEL_IPC_LAST_COMMAND
 };
 
@@ -84,7 +85,9 @@ struct RequestHandler {
   virtual void FocusOut(DWORD param, DWORD session_id) {}
   virtual void SubmitLlmContext(DWORD session_id,
                                 const std::wstring& request_id,
-                                const std::wstring& context) {}
+                                const std::wstring& context,
+                                EatLine eat = 0) {}
+  virtual bool PollSession(DWORD session_id, EatLine eat = 0) { return false; }
   virtual void RefreshSession(DWORD session_id) {}
   virtual void UpdateInputPosition(RECT const& rc, DWORD session_id) {}
   virtual void StartMaintenance() {}
@@ -134,6 +137,7 @@ class Client {
   bool ProcessKeyEvent(KeyEvent const& keyEvent);
   bool SubmitLlmContext(const std::wstring& request_id,
                         const std::wstring& context);
+  bool PollSession();
   // 上屏正在編輯的文字
   bool CommitComposition();
   // 清除正在編輯的文字

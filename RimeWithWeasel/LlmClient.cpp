@@ -445,9 +445,16 @@ LlmResponse RequestCandidates(const std::wstring& base_url,
   std::wstring path(parts.lpszUrlPath, parts.dwUrlPathLength);
   if (parts.dwExtraInfoLength)
     path.append(parts.lpszExtraInfo, parts.dwExtraInfoLength);
+#ifndef WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY
+#define WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY 4
+#endif
   HINTERNET session =
-      WinHttpOpen(L"Weasel-LLM/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+      WinHttpOpen(L"Weasel-LLM/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                   WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+  if (!session) {
+    session = WinHttpOpen(L"Weasel-LLM/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                          WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+  }
   if (!session) {
     DWORD err = GetLastError();
     return {false, L"WinHTTP 初始化失败 (" + std::to_wstring(err) + L")", {}};

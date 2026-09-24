@@ -20,14 +20,16 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
     std::wstring prefix_context;
     if (llm_trigger.context_enabled) {
       const LONG context_chars =
-          max(0L, min(2000L, static_cast<LONG>(llm_trigger.context_chars)));
-      const LONG search_chars = max(
-          0L, min(500L, static_cast<LONG>(llm_trigger.boundary_search_chars)));
+          std::clamp(static_cast<LONG>(llm_trigger.context_chars), 0L, 2000L);
+      const LONG search_chars = std::clamp(
+          static_cast<LONG>(llm_trigger.boundary_search_chars), 0L, 500L);
       std::wstring raw_context = _ReadTextBeforeCaret(
           ec, _pEditSessionContext, context_chars + search_chars);
       if (static_cast<LONG>(raw_context.size()) > context_chars) {
         const size_t cut = raw_context.size() - context_chars;
-        const size_t limit = min(raw_context.size(), cut + search_chars);
+        const size_t limit = (cut + search_chars < raw_context.size())
+                                 ? cut + search_chars
+                                 : raw_context.size();
         const wchar_t* boundaries[] = {L"\r\n\r\n", L"\n\n", L"\r\n", L"\n",
                                        L"。",       L"！",   L"？",   L"；",
                                        L"：",       L"，"};
@@ -94,11 +96,12 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
   // created.
   _UpdateUI(*context, _status);
 
-  if (_llm_timer_id) {
-    if (context->cinfo.candies.empty() ||
-        context->cinfo.candies[0].str != L"AI分析中...") {
-      _StopLlmPolling();
-    }
+  if (!context->cinfo.candies.empty() &&
+      context->cinfo.candies[0].str == L"AI分析中...") {
+    if (!_llm_timer_id)
+      _StartLlmPolling(_pEditSessionContext);
+  } else if (_llm_timer_id) {
+    _StopLlmPolling();
   }
 
   return TRUE;

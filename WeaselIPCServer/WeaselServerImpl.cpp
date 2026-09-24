@@ -403,8 +403,24 @@ DWORD ServerImpl::OnLlmContext(WEASEL_IPC_COMMAND uMsg,
   const auto context = read_field(L"llm.context");
   if (request_id.empty())
     return 0;
-  m_pRequestHandler->SubmitLlmContext(lParam, request_id, context);
+  auto eat = [this](std::wstring& msg) -> bool {
+    *channel << msg;
+    return true;
+  };
+  m_pRequestHandler->SubmitLlmContext(lParam, request_id, context, eat);
   return 1;
+}
+
+DWORD ServerImpl::OnPollSession(WEASEL_IPC_COMMAND uMsg,
+                                DWORD wParam,
+                                DWORD lParam) {
+  if (!m_pRequestHandler)
+    return 0;
+  auto eat = [this](std::wstring& msg) -> bool {
+    *channel << msg;
+    return true;
+  };
+  return m_pRequestHandler->PollSession(lParam, eat) ? 1 : 0;
 }
 
 #define MAP_PIPE_MSG_HANDLE(__msg, __wParam, __lParam) \
@@ -446,6 +462,7 @@ void ServerImpl::HandlePipeMessage(PipeMessage pipe_msg, _Resp resp) {
                   OnHighlightCandidateOnCurrentPage);
   PIPE_MSG_HANDLE(WEASEL_IPC_CHANGE_PAGE, OnChangePage);
   PIPE_MSG_HANDLE(WEASEL_IPC_LLM_CONTEXT, OnLlmContext);
+  PIPE_MSG_HANDLE(WEASEL_IPC_POLL_SESSION, OnPollSession);
   PIPE_MSG_HANDLE(WEASEL_IPC_TRAY_COMMAND, OnCommand);
   END_MAP_PIPE_MSG_HANDLE(result);
 

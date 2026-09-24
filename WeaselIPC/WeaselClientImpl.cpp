@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "WeaselClientImpl.h"
 #include <StringAlgorithm.hpp>
 
@@ -71,6 +71,12 @@ bool ClientImpl::SubmitLlmContext(const std::wstring& request_id,
   channel << L"llm.request_id=" << escape_string(request_id) << L"\n"
           << L"llm.context=" << escape_string(context) << L"\n.\n";
   return _SendMessage(WEASEL_IPC_LLM_CONTEXT, 0, session_id) != 0;
+}
+
+bool ClientImpl::PollSession() {
+  if (!_Active())
+    return false;
+  return _SendMessage(WEASEL_IPC_POLL_SESSION, 0, session_id) != 0;
 }
 
 bool ClientImpl::CommitComposition() {
@@ -236,6 +242,10 @@ bool Client::ProcessKeyEvent(KeyEvent const& keyEvent) {
 bool Client::SubmitLlmContext(const std::wstring& request_id,
                               const std::wstring& context) {
   return m_pImpl->SubmitLlmContext(request_id, context);
+}
+
+bool Client::PollSession() {
+  return m_pImpl->PollSession();
 }
 
 bool Client::CommitComposition() {
