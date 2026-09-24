@@ -1,7 +1,8 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 
 #include <WeaselIPCData.h>
 #include <thread>
+#include <map>
 #include <shellapi.h>
 #include <tlhelp32.h>
 #include "WeaselTSF.h"
@@ -97,6 +98,7 @@ STDMETHODIMP WeaselTSF::Activate(ITfThreadMgr* pThreadMgr,
 }
 
 STDMETHODIMP WeaselTSF::Deactivate() {
+  _StopLlmPolling();
   m_client.EndSession();
 
   _InitTextEditSink(com_ptr<ITfDocumentMgr>());
@@ -279,4 +281,45 @@ bool WeaselTSF::_EnsureServerConnected() {
   } else {
     return true;
   }
+}
+
+static std::map<UINT_PTR, WeaselTSF*> s_llm_timers;
+static VOID CALLBACK LlmTimerProc(HWND hwnd,
+                                  UINT uMsg,
+                                  UINT_PTR idEvent,
+                                  DWORD dwTime) {
+  auto it = s_llm_timers.find(idEvent);
+  if (it != s_llm_timers.end() && it->second) {
+    it->second->_OnLlmTimer(idEvent);
+  }
+}
+
+void WeaselTSF::_StartLlmPolling(com_ptr<ITfContext> pContext) {
+  _StopLlmPolling();
+  _pEditSessionContext = pContext;
+  _llm_poll_ticks = 0;
+  _llm_timer_id = ::SetTimer(NULL, 0, 80, (TIMERPROC)LlmTimerProc);
+  if (_llm_timer_id) {
+    s_llm_timers[_llm_timer_id] = this;
+  }
+}
+
+void WeaselTSF::_StopLlmPolling() {
+  if (_llm_timer_id) {
+    ::KillTimer(NULL, _llm_timer_id);
+    s_llm_timers.erase(_llm_timer_id);
+    _llm_timer_id = 0;
+  }
+  _llm_poll_ticks = 0;
+}
+
+void WeaselTSF::_OnLlmTimer(UINT_PTR timer_id) {
+  if (timer_id != _llm_timer_id)
+    return;
+  ++_llm_poll_ticks;
+  if (_llm_poll_ticks > 50 || !_IsComposing() || !_pEditSessionContext) {
+    _StopLlmPolling();
+    return;
+  }
+  _UpdateComposition(_pEditSessionContext);
 }

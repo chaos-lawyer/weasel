@@ -47,6 +47,7 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
       prefix_context = std::move(raw_context);
     }
     m_client.SubmitLlmContext(llm_trigger.request_id, prefix_context);
+    _StartLlmPolling(_pEditSessionContext);
   }
 
   _UpdateLanguageBar(_status);
@@ -92,6 +93,14 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
   // still updated by the queued read session after the new composition is
   // created.
   _UpdateUI(*context, _status);
+
+  if (_llm_timer_id) {
+    if (context->candies.empty() ||
+        (!context->candies.empty() &&
+         context->candies[0].str != L"AI分析中...")) {
+      _StopLlmPolling();
+    }
+  }
 
   return TRUE;
 }

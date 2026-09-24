@@ -144,6 +144,11 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   void _HideUI();
   com_ptr<ITfContext> _GetUIContextDocument();
 
+  /* LLM Polling */
+  void _StartLlmPolling(com_ptr<ITfContext> pContext);
+  void _StopLlmPolling();
+  void _OnLlmTimer(UINT_PTR timer_id);
+
   /* Display Attribute */
   void _ClearCompositionDisplayAttributes(TfEditCookie ec,
                                           _In_ ITfContext* pContext);
@@ -239,4 +244,6 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   BOOL _async_edit = false;
   BOOL _committed = false;
   BOOL _isToOpenClose = false;
+  UINT_PTR _llm_timer_id = 0;
+  int _llm_poll_ticks = 0;
 };

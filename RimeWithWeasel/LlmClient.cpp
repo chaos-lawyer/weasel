@@ -165,23 +165,38 @@ std::string JsonString(const std::string& value) {
   return out.str();
 }
 
-static std::vector<CandidateItem> ParseResponse(
+static LlmResponse ParseResponse(
     const std::string& body,
     const std::wstring& default_predict_comment,
     const std::wstring& default_continuation_comment,
     int continuation_count,
     int limit) {
-  std::vector<CandidateItem> result;
+  LlmResponse response;
   try {
     std::stringstream stream(body);
     boost::property_tree::ptree root;
     boost::property_tree::read_json(stream, root);
+
+    auto error_opt = root.get_child_optional("error");
+    if (error_opt) {
+      std::string err_msg = error_opt->get<std::string>("message", "");
+      if (err_msg.empty()) {
+        err_msg = error_opt->get<std::string>("code", "未知错误");
+      }
+      response.success = false;
+      response.error_message = Wide(err_msg);
+      return response;
+    }
+
     std::string content =
         root.get<std::string>("choices.0.message.content", "");
     auto begin = content.find('{');
     auto end = content.rfind('}');
-    if (begin == std::string::npos || end == std::string::npos || end < begin)
-      return result;
+    if (begin == std::string::npos || end == std::string::npos || end < begin) {
+      response.success = false;
+      response.error_message = L"模型返回内容不包含有效 JSON";
+      return response;
+    }
     std::stringstream json(content.substr(begin, end - begin + 1));
     boost::property_tree::ptree parsed;
     boost::property_tree::read_json(json, parsed);
@@ -197,7 +212,7 @@ static std::vector<CandidateItem> ParseResponse(
         return;
       std::wstring comment =
           comment_raw.empty() ? fallback_comment : Wide(comment_raw);
-      result.push_back({std::move(text), std::move(comment)});
+      response.candidates.push_back({std::move(text), std::move(comment)});
     };
 
     auto predictions_opt = parsed.get_child_optional("predictions");
@@ -206,7 +221,7 @@ static std::vector<CandidateItem> ParseResponse(
     if (predictions_opt || continuations_opt) {
       if (predictions_opt) {
         for (const auto& item : *predictions_opt) {
-          if (static_cast<int>(result.size()) >= limit)
+          if (static_cast<int>(response.candidates.size()) >= limit)
             break;
           if (item.second.empty()) {
             add_item(item.second.get_value<std::string>(), "",
@@ -220,7 +235,7 @@ static std::vector<CandidateItem> ParseResponse(
       }
       if (continuations_opt) {
         for (const auto& item : *continuations_opt) {
-          if (static_cast<int>(result.size()) >= limit)
+          if (static_cast<int>(response.candidates.size()) >= limit)
             break;
           if (item.second.empty()) {
             add_item(item.second.get_value<std::string>(), "",
@@ -264,7 +279,7 @@ static std::vector<CandidateItem> ParseResponse(
                        : 1)
                 : total;
         for (size_t i = 0; i < total; ++i) {
-          if (static_cast<int>(result.size()) >= limit)
+          if (static_cast<int>(response.candidates.size()) >= limit)
             break;
           const std::wstring fallback = (i >= continuation_start)
                                             ? default_continuation_comment
@@ -273,10 +288,22 @@ static std::vector<CandidateItem> ParseResponse(
         }
       }
     }
+    if (response.candidates.empty()) {
+      response.success = false;
+      response.error_message = L"模型未返回有效候选";
+    } else {
+      response.success = true;
+    }
+  } catch (const std::exception& e) {
+    response.success = false;
+    response.error_message = Wide(e.what());
+    response.candidates.clear();
   } catch (...) {
-    result.clear();
+    response.success = false;
+    response.error_message = L"解析模型返回数据异常";
+    response.candidates.clear();
   }
-  return result;
+  return response;
 }
 }  // namespace
 
@@ -351,24 +378,22 @@ InputPaths ParseInput(const std::string& raw_input,
   return paths;
 }
 
-std::vector<CandidateItem> RequestCandidates(
-    const std::wstring& base_url,
-    const std::wstring& model,
-    const std::wstring& api_key,
-    const std::wstring& prompt_both,
-    const std::wstring& prompt_initials_only,
-    const std::wstring& default_predict_comment,
-    const std::wstring& default_continuation_comment,
-    int continuation_count,
-    const std::wstring& context,
-    const InputPaths& input,
-    int timeout_ms,
-    double temperature,
-    int candidate_count,
-    bool cache_enabled,
-    int cache_ttl_seconds,
-    int cache_max_entries) {
-  std::vector<CandidateItem> empty;
+LlmResponse RequestCandidates(const std::wstring& base_url,
+                              const std::wstring& model,
+                              const std::wstring& api_key,
+                              const std::wstring& prompt_both,
+                              const std::wstring& prompt_initials_only,
+                              const std::wstring& default_predict_comment,
+                              const std::wstring& default_continuation_comment,
+                              int continuation_count,
+                              const std::wstring& context,
+                              const InputPaths& input,
+                              int timeout_ms,
+                              double temperature,
+                              int candidate_count,
+                              bool cache_enabled,
+                              int cache_ttl_seconds,
+                              int cache_max_entries) {
   const std::string cache_key =
       Utf8(base_url) + "\n" + Utf8(model) + "\n" + Utf8(prompt_both) + "\n" +
       Utf8(prompt_initials_only) + "\n" + Utf8(default_predict_comment) + "\n" +
@@ -383,13 +408,19 @@ std::vector<CandidateItem> RequestCandidates(
     if (cached != g_cache.end()) {
       const auto age = std::chrono::steady_clock::now() - cached->second.first;
       if (age <= std::chrono::seconds(cache_ttl_seconds))
-        return cached->second.second;
+        return {true, L"", cached->second.second};
       g_cache.erase(cached);
     }
   }
-  if (api_key.empty() || base_url.empty() || model.empty() ||
-      prompt_both.empty() || prompt_initials_only.empty())
-    return empty;
+  if (base_url.empty())
+    return {false, L"Base URL 未配置", {}};
+  if (model.empty())
+    return {false, L"Model 未配置", {}};
+  if (api_key.empty())
+    return {false, L"API Key 未配置", {}};
+  if (prompt_both.empty() || prompt_initials_only.empty())
+    return {false, L"Prompt 模板未配置", {}};
+
   std::wstring url = base_url;
   while (!url.empty() && url.back() == L'/')
     url.pop_back();
@@ -406,34 +437,37 @@ std::vector<CandidateItem> RequestCandidates(
   parts.dwUrlPathLength = static_cast<DWORD>(-1);
   parts.dwExtraInfoLength = static_cast<DWORD>(-1);
   if (!WinHttpCrackUrl(url.c_str(), 0, 0, &parts))
-    return empty;
+    return {false, L"Base URL 格式无效", {}};
   std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
   if (parts.nScheme != INTERNET_SCHEME_HTTPS && host != L"localhost" &&
       host != L"127.0.0.1" && host != L"::1")
-    return empty;
+    return {false, L"仅支持 HTTPS 请求 (或 localhost)", {}};
   std::wstring path(parts.lpszUrlPath, parts.dwUrlPathLength);
   if (parts.dwExtraInfoLength)
     path.append(parts.lpszExtraInfo, parts.dwExtraInfoLength);
   HINTERNET session =
       WinHttpOpen(L"Weasel-LLM/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                   WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-  if (!session)
-    return empty;
+  if (!session) {
+    DWORD err = GetLastError();
+    return {false, L"WinHTTP 初始化失败 (" + std::to_wstring(err) + L")", {}};
+  }
   WinHttpSetTimeouts(session, timeout_ms, timeout_ms, timeout_ms, timeout_ms);
   HINTERNET connection = WinHttpConnect(session, host.c_str(), parts.nPort, 0);
-  HINTERNET request =
-      connection
-          ? WinHttpOpenRequest(connection, L"POST", path.c_str(), nullptr,
-                               WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
-                               parts.nScheme == INTERNET_SCHEME_HTTPS
-                                   ? WINHTTP_FLAG_SECURE
-                                   : 0)
-          : nullptr;
-  if (!request) {
-    if (connection)
-      WinHttpCloseHandle(connection);
+  if (!connection) {
+    DWORD err = GetLastError();
     WinHttpCloseHandle(session);
-    return empty;
+    return {false, L"连接服务器失败 (" + std::to_wstring(err) + L")", {}};
+  }
+  HINTERNET request = WinHttpOpenRequest(
+      connection, L"POST", path.c_str(), nullptr, WINHTTP_NO_REFERER,
+      WINHTTP_DEFAULT_ACCEPT_TYPES,
+      parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0);
+  if (!request) {
+    DWORD err = GetLastError();
+    WinHttpCloseHandle(connection);
+    WinHttpCloseHandle(session);
+    return {false, L"创建请求失败 (" + std::to_wstring(err) + L")", {}};
   }
   std::string user_data =
       "{\"context\":" + JsonString(Utf8(context)) +
@@ -452,48 +486,127 @@ std::vector<CandidateItem> RequestCandidates(
   std::wstring headers =
       L"Content-Type: application/json\r\nAuthorization: Bearer " + api_key +
       L"\r\n";
-  bool sent = WinHttpSendRequest(request, headers.c_str(),
-                                 static_cast<DWORD>(headers.size()),
-                                 const_cast<char*>(body.data()),
-                                 static_cast<DWORD>(body.size()),
-                                 static_cast<DWORD>(body.size()), 0) &&
-              WinHttpReceiveResponse(request, nullptr);
-  std::string response;
+  bool sent = WinHttpSendRequest(
+      request, headers.c_str(), static_cast<DWORD>(headers.size()),
+      const_cast<char*>(body.data()), static_cast<DWORD>(body.size()),
+      static_cast<DWORD>(body.size()), 0);
+  if (!sent) {
+    DWORD err = GetLastError();
+    WinHttpCloseHandle(request);
+    WinHttpCloseHandle(connection);
+    WinHttpCloseHandle(session);
+    std::wstring err_msg;
+    switch (err) {
+      case ERROR_WINHTTP_NAME_NOT_RESOLVED:
+        err_msg = L"域名解析失败 (" + host + L")";
+        break;
+      case ERROR_WINHTTP_CANNOT_CONNECT:
+        err_msg = L"无法连接到服务器";
+        break;
+      case ERROR_WINHTTP_TIMEOUT:
+        err_msg = L"请求发送超时";
+        break;
+      case ERROR_WINHTTP_SECURE_FAILURE:
+        err_msg = L"SSL/TLS 证书校验失败";
+        break;
+      default:
+        err_msg = L"发送请求失败 (" + std::to_wstring(err) + L")";
+        break;
+    }
+    return {false, err_msg, {}};
+  }
+
+  bool received = WinHttpReceiveResponse(request, nullptr);
+  if (!received) {
+    DWORD err = GetLastError();
+    WinHttpCloseHandle(request);
+    WinHttpCloseHandle(connection);
+    WinHttpCloseHandle(session);
+    std::wstring err_msg =
+        (err == ERROR_WINHTTP_TIMEOUT)
+            ? L"等待响应超时 (" + std::to_wstring(timeout_ms) + L"ms)"
+            : L"接收响应失败 (" + std::to_wstring(err) + L")";
+    return {false, err_msg, {}};
+  }
+
   DWORD status = 0, status_size = sizeof(status);
-  if (sent)
-    WinHttpQueryHeaders(request,
-                        WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                        WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
-                        WINHTTP_NO_HEADER_INDEX);
-  if (sent && status >= 200 && status < 300) {
-    DWORD available = 0;
-    while (WinHttpQueryDataAvailable(request, &available) && available > 0) {
-      std::string chunk(available, '\0');
-      DWORD read = 0;
-      if (!WinHttpReadData(request, &chunk[0], available, &read) || !read)
-        break;
-      chunk.resize(read);
-      response += chunk;
-      if (response.size() > 1024 * 1024) {
-        response.clear();
-        break;
-      }
+  WinHttpQueryHeaders(request,
+                      WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                      WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
+                      WINHTTP_NO_HEADER_INDEX);
+  std::string response;
+  DWORD available = 0;
+  while (WinHttpQueryDataAvailable(request, &available) && available > 0) {
+    std::string chunk(available, '\0');
+    DWORD read = 0;
+    if (!WinHttpReadData(request, &chunk[0], available, &read) || !read)
+      break;
+    chunk.resize(read);
+    response += chunk;
+    if (response.size() > 1024 * 1024) {
+      response.clear();
+      break;
     }
   }
   WinHttpCloseHandle(request);
   WinHttpCloseHandle(connection);
   WinHttpCloseHandle(session);
-  auto candidates = response.empty()
-                        ? empty
-                        : ParseResponse(response, default_predict_comment,
-                                        default_continuation_comment,
-                                        continuation_count, candidate_count);
-  if (cache_enabled && !candidates.empty() && cache_max_entries > 0) {
+
+  if (status != 200) {
+    std::wstring detail;
+    if (!response.empty()) {
+      try {
+        std::stringstream ss(response);
+        boost::property_tree::ptree err_tree;
+        boost::property_tree::read_json(ss, err_tree);
+        std::string msg = err_tree.get<std::string>("error.message", "");
+        if (msg.empty())
+          msg = err_tree.get<std::string>("message", "");
+        if (!msg.empty())
+          detail = L": " + Wide(msg);
+      } catch (...) {
+      }
+    }
+    std::wstring status_text;
+    switch (status) {
+      case 401:
+        status_text = L"HTTP 401 (API Key 无效或未授权)";
+        break;
+      case 403:
+        status_text = L"HTTP 403 (权限不足或禁止访问)";
+        break;
+      case 404:
+        status_text = L"HTTP 404 (接口路径未找到)";
+        break;
+      case 429:
+        status_text = L"HTTP 429 (额度耗尽或请求受限)";
+        break;
+      case 500:
+      case 502:
+      case 503:
+      case 504:
+        status_text = L"HTTP " + std::to_wstring(status) + L" (服务提供商故障)";
+        break;
+      default:
+        status_text = L"HTTP " + std::to_wstring(status);
+        break;
+    }
+    return {false, status_text + detail, {}};
+  }
+
+  if (response.empty())
+    return {false, L"服务器返回内容为空", {}};
+
+  auto resp = ParseResponse(response, default_predict_comment,
+                            default_continuation_comment, continuation_count,
+                            candidate_count);
+  if (cache_enabled && resp.success && !resp.candidates.empty() &&
+      cache_max_entries > 0) {
     std::lock_guard<std::mutex> lock(g_cache_mutex);
     while (static_cast<int>(g_cache.size()) >= cache_max_entries)
       g_cache.erase(g_cache.begin());
-    g_cache[cache_key] = {std::chrono::steady_clock::now(), candidates};
+    g_cache[cache_key] = {std::chrono::steady_clock::now(), resp.candidates};
   }
-  return candidates;
+  return resp;
 }
 }  // namespace weasel_llm

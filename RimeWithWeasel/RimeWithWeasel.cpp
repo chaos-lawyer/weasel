@@ -574,9 +574,10 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
   const bool repeated_llm_tab = keyEvent.keycode == ibus::Tab &&
                                 !session_status.llm_request_id.empty() &&
                                 !session_status.llm_raw_input.empty();
-  const bool numeric_llm_selection = !session_status.llm_candidates.empty() &&
-                                     keyEvent.keycode >= '1' &&
-                                     keyEvent.keycode <= '9';
+  const bool numeric_llm_selection =
+      !session_status.llm_candidates.empty() && !session_status.llm_loading &&
+      !session_status.llm_is_error && keyEvent.keycode >= '1' &&
+      keyEvent.keycode <= '9';
   const bool selecting_llm_candidate =
       (keyEvent.keycode == ibus::Select &&
        !session_status.llm_commit_text.empty()) ||
@@ -590,6 +591,8 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
     session_status.llm_schema_id.clear();
     session_status.llm_context.clear();
     session_status.llm_candidates.clear();
+    session_status.llm_loading = false;
+    session_status.llm_is_error = false;
     session_status.llm_commit_text.clear();
     session_status.llm_request_submitted = false;
   }
@@ -620,7 +623,17 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
             keyEvent.keycode, keyEvent.mask, runtime_keys, num_candidates,
             selected_index);
         if (action == weasel::DynamicCandidateSelectAction::SelectCandidate) {
-          if (selected_index < session_status.llm_candidates.size()) {
+          if (session_status.llm_loading || session_status.llm_is_error) {
+            if (selected_index > 0) {
+              handled = rime_api->select_candidate_on_current_page(
+                  session_id, selected_index - 1);
+              ++session_status.llm_generation;
+              session_status.llm_request_id.clear();
+              session_status.llm_candidates.clear();
+              session_status.llm_loading = false;
+              session_status.llm_is_error = false;
+            }
+          } else if (selected_index < session_status.llm_candidates.size()) {
             session_status.llm_commit_text =
                 session_status.llm_candidates[selected_index].text;
             rime_api->clear_composition(session_id);
@@ -646,16 +659,8 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
     if (!session_status.llm_candidates.empty() &&
         !(keyEvent.mask & ibus::Modifier::RELEASE_MASK) &&
         keyEvent.keycode >= '1' && keyEvent.keycode <= '9') {
-      const size_t selected = static_cast<size_t>(keyEvent.keycode - '1');
-      if (selected < session_status.llm_candidates.size()) {
-        session_status.llm_commit_text =
-            session_status.llm_candidates[selected].text;
-        rime_api->clear_composition(session_id);
-        handled = True;
-        custom_key_processed = true;
-      } else {
-        const size_t local_index =
-            selected - session_status.llm_candidates.size();
+      if (session_status.llm_loading || session_status.llm_is_error) {
+        const size_t local_index = static_cast<size_t>(keyEvent.keycode - '1');
         RIME_STRUCT(RimeContext, selection_context);
         if (rime_api->get_context(session_id, &selection_context)) {
           if (local_index <
@@ -666,8 +671,35 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
             ++session_status.llm_generation;
             session_status.llm_request_id.clear();
             session_status.llm_candidates.clear();
+            session_status.llm_loading = false;
+            session_status.llm_is_error = false;
           }
           rime_api->free_context(&selection_context);
+        }
+      } else {
+        const size_t selected = static_cast<size_t>(keyEvent.keycode - '1');
+        if (selected < session_status.llm_candidates.size()) {
+          session_status.llm_commit_text =
+              session_status.llm_candidates[selected].text;
+          rime_api->clear_composition(session_id);
+          handled = True;
+          custom_key_processed = true;
+        } else {
+          const size_t local_index =
+              selected - session_status.llm_candidates.size();
+          RIME_STRUCT(RimeContext, selection_context);
+          if (rime_api->get_context(session_id, &selection_context)) {
+            if (local_index <
+                static_cast<size_t>(selection_context.menu.num_candidates)) {
+              handled = rime_api->select_candidate_on_current_page(session_id,
+                                                                   local_index);
+              custom_key_processed = true;
+              ++session_status.llm_generation;
+              session_status.llm_request_id.clear();
+              session_status.llm_candidates.clear();
+            }
+            rime_api->free_context(&selection_context);
+          }
         }
       }
     }
@@ -695,8 +727,25 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
       RIME_STRUCT(RimeStatus, status);
       if (rime_api->get_status(session_id, &status) && status.schema_id) {
         const auto text_config = _ReadLlmTextConfig(custom_config_path);
-        if (_HasLlmTextConfig(text_config) &&
-            _LlmBool(text_config, "enabled", true)) {
+        if (!_HasLlmTextConfig(text_config)) {
+          session_status.llm_loading = false;
+          session_status.llm_is_error = true;
+          session_status.llm_request_pending = false;
+          session_status.llm_request_submitted = false;
+          std::wstring err_msg = L"未找到 llm_config.txt 配置";
+          if (!text_config.empty()) {
+            if (!_LlmBool(text_config, "enabled", true)) {
+              err_msg = L"LLM 功能已禁用 (enabled: false)";
+            } else if (_LlmValue(text_config, "api_key").empty()) {
+              err_msg = L"配置缺少 api_key";
+            } else if (_LlmValue(text_config, "base_url").empty()) {
+              err_msg = L"配置缺少 base_url";
+            } else if (_LlmValue(text_config, "model").empty()) {
+              err_msg = L"配置缺少 model";
+            }
+          }
+          session_status.llm_candidates = {{err_msg, L"✦ 错误"}};
+        } else {
           const bool same_request =
               session_status.llm_raw_input == raw_input &&
               session_status.llm_schema_id == status.schema_id &&
@@ -715,6 +764,9 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
           session_status.llm_boundary_search_chars = std::clamp(
               _LlmInt(text_config, "boundary_search_chars", 100), 0, 500);
           session_status.llm_request_pending = true;
+          session_status.llm_loading = true;
+          session_status.llm_is_error = false;
+          session_status.llm_candidates = {{L"AI分析中...", L"✦ 请稍候"}};
           if (!same_request)
             session_status.llm_request_submitted = false;
         }
@@ -750,6 +802,8 @@ void RimeWithWeaselHandler::CommitComposition(WeaselSessionId ipc_id) {
   ++llm_status.llm_generation;
   llm_status.llm_request_id.clear();
   llm_status.llm_candidates.clear();
+  llm_status.llm_loading = false;
+  llm_status.llm_is_error = false;
   llm_status.llm_commit_text.clear();
   llm_status.llm_request_submitted = false;
   rime_api->commit_composition(to_session_id(ipc_id));
@@ -765,6 +819,8 @@ void RimeWithWeaselHandler::ClearComposition(WeaselSessionId ipc_id) {
   ++llm_status.llm_generation;
   llm_status.llm_request_id.clear();
   llm_status.llm_candidates.clear();
+  llm_status.llm_loading = false;
+  llm_status.llm_is_error = false;
   llm_status.llm_commit_text.clear();
   llm_status.llm_request_submitted = false;
   rime_api->clear_composition(to_session_id(ipc_id));
@@ -780,6 +836,18 @@ void RimeWithWeaselHandler::SelectCandidateOnCurrentPage(
   if (m_disabled)
     return;
   SessionStatus& session_status = get_session_status(ipc_id);
+  if (session_status.llm_loading || session_status.llm_is_error) {
+    if (index == 0)
+      return;
+    index -= 1;
+    rime_api->select_candidate_on_current_page(to_session_id(ipc_id), index);
+    ++session_status.llm_generation;
+    session_status.llm_request_id.clear();
+    session_status.llm_candidates.clear();
+    session_status.llm_loading = false;
+    session_status.llm_is_error = false;
+    return;
+  }
   if (index < session_status.llm_candidates.size()) {
     session_status.llm_commit_text = session_status.llm_candidates[index].text;
     rime_api->clear_composition(to_session_id(ipc_id));
@@ -954,8 +1022,7 @@ void RimeWithWeaselHandler::SubmitLlmContext(WeaselSessionId ipc_id,
          candidate_count, cache_enabled = !!cache_enabled, cache_ttl_seconds,
          cache_max_entries]() {
           try {
-            std::vector<weasel_llm::CandidateItem> candidates;
-            candidates = weasel_llm::RequestCandidates(
+            auto response = weasel_llm::RequestCandidates(
                 u8tow(base_url), u8tow(model), u8tow(api_key),
                 u8tow(prompt_both), u8tow(prompt_initials_only),
                 u8tow(predict_comment), u8tow(continuation_comment),
@@ -963,15 +1030,20 @@ void RimeWithWeaselHandler::SubmitLlmContext(WeaselSessionId ipc_id,
                 timeout_ms, temperature, candidate_count, cache_enabled,
                 cache_ttl_seconds, cache_max_entries);
             std::vector<LlmCandidateItem> converted;
-            converted.reserve(candidates.size());
-            for (auto& item : candidates) {
+            if (response.success) {
+              converted.reserve(response.candidates.size());
+              for (auto& item : response.candidates) {
+                converted.push_back(
+                    {std::move(item.text), std::move(item.comment)});
+              }
+            } else {
               converted.push_back(
-                  {std::move(item.text), std::move(item.comment)});
+                  {L"AI失败: " + response.error_message, L"✦ 错误"});
             }
             {
               std::lock_guard<std::mutex> lock(m_llm_results_mutex);
               m_llm_results.push_back({ipc_id_snapshot, request_snapshot,
-                                       generation_snapshot,
+                                       generation_snapshot, response.success,
                                        std::move(converted)});
             }
             if (_AsyncRefreshCallback)
@@ -1007,13 +1079,16 @@ void RimeWithWeaselHandler::RefreshSession(DWORD ipc_id) {
     auto& status = session->second;
     if (result.request_id == status.llm_request_id &&
         result.generation == status.llm_generation) {
+      status.llm_loading = false;
+      status.llm_is_error = !result.success;
       status.llm_candidates = std::move(result.candidates);
       if (status.llm_candidates.empty())
         status.llm_request_submitted = false;
       break;
     }
   }
-  if (!session->second.llm_candidates.empty())
+  if (!session->second.llm_candidates.empty() || session->second.llm_loading ||
+      session->second.llm_is_error)
     _UpdateUI(ipc_id);
 }
 
@@ -1159,6 +1234,8 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
     }
   }
   if (llm_session && !llm_session->llm_candidates.empty()) {
+    const bool is_status =
+        llm_session->llm_loading || llm_session->llm_is_error;
     const size_t count = llm_session->llm_candidates.size();
     std::vector<Text> old_candies = std::move(cinfo.candies);
     std::vector<Text> old_comments = std::move(cinfo.comments);
@@ -1169,12 +1246,16 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
     for (size_t i = 0; i < count; ++i) {
       cinfo.candies[i].str = escape_string(llm_session->llm_candidates[i].text);
       cinfo.comments[i].str =
-          llm_session->llm_ai_comment_enabled
+          (llm_session->llm_ai_comment_enabled || is_status)
               ? escape_string(llm_session->llm_candidates[i].comment)
               : std::wstring();
-      cinfo.labels[i].str = escape_string(weasel::FormatCandidateLabel(
-          i, runtime_labels, runtime_keys, schema_select_labels,
-          schema_select_keys));
+      if (is_status) {
+        cinfo.labels[i].str = llm_session->llm_loading ? L"[AI]" : L"[!]";
+      } else {
+        cinfo.labels[i].str = escape_string(weasel::FormatCandidateLabel(
+            i, runtime_labels, runtime_keys, schema_select_labels,
+            schema_select_keys));
+      }
     }
     cinfo.candies.insert(cinfo.candies.end(), old_candies.begin(),
                          old_candies.end());
@@ -1183,13 +1264,19 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
     cinfo.labels.insert(cinfo.labels.end(), old_labels.begin(),
                         old_labels.end());
     for (size_t i = 0; i < old_labels.size(); ++i) {
+      const size_t label_index = is_status ? i : (count + i);
       cinfo.labels[count + i].str = escape_string(weasel::FormatCandidateLabel(
-          count + i, runtime_labels, runtime_keys, schema_select_labels,
+          label_index, runtime_labels, runtime_keys, schema_select_labels,
           schema_select_keys));
     }
-    cinfo.highlighted = 0;
+    if (is_status) {
+      cinfo.highlighted = count + ctx.menu.highlighted_candidate_index;
+    } else {
+      cinfo.highlighted = 0;
+    }
+  } else {
+    cinfo.highlighted = ctx.menu.highlighted_candidate_index;
   }
-  cinfo.highlighted = ctx.menu.highlighted_candidate_index;
   cinfo.currentPage = ctx.menu.page_no;
   cinfo.is_last_page = ctx.menu.is_last_page;
 

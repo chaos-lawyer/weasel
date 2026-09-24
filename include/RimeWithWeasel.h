@@ -46,6 +46,8 @@ struct SessionStatus {
         llm_boundary_search_chars(0),
         llm_request_pending(false),
         llm_request_submitted(false),
+        llm_loading(false),
+        llm_is_error(false),
         llm_ai_comment_enabled(false),
         llm_ai_comment() {
     RIME_STRUCT(RimeStatus, status);
@@ -67,6 +69,8 @@ struct SessionStatus {
   int llm_boundary_search_chars;
   bool llm_request_pending;
   bool llm_request_submitted;
+  bool llm_loading;
+  bool llm_is_error;
   bool llm_ai_comment_enabled;
   std::wstring llm_ai_comment;
   std::wstring llm_context;
@@ -172,6 +176,7 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
     DWORD ipc_id;
     std::wstring request_id;
     uint64_t generation;
+    bool success;
     std::vector<LlmCandidateItem> candidates;
   };
   struct LlmWorker {

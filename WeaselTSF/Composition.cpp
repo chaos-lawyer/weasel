@@ -119,6 +119,7 @@ STDMETHODIMP CEndCompositionEditSession::DoEditSession(TfEditCookie ec) {
 void WeaselTSF::_EndComposition(com_ptr<ITfContext> pContext,
                                 BOOL clear,
                                 BOOL endUI) {
+  _StopLlmPolling();
   CEndCompositionEditSession* pEditSession;
   HRESULT hr;
   com_ptr<ITfComposition> pComposition = _pComposition;
@@ -392,6 +393,7 @@ void WeaselTSF::_UpdateComposition(com_ptr<ITfContext> pContext) {
 /* Composition State */
 STDMETHODIMP WeaselTSF::OnCompositionTerminated(TfEditCookie ecWrite,
                                                 ITfComposition* pComposition) {
+  _StopLlmPolling();
   // NOTE:
   // This will be called when an edit session ended up with an empty composition
   // string, Even if it is closed normally. Silly M$.
