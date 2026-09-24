@@ -225,6 +225,10 @@ static bool _HasLlmTextConfig(
       _LlmValue(values, "model").empty()) {
     return false;
   }
+  if (_LlmValue(values, "prompt_both").empty() ||
+      _LlmValue(values, "prompt_initials_only").empty()) {
+    return false;
+  }
   return true;
 }
 
@@ -742,6 +746,10 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
               err_msg = L"配置缺少 base_url";
             } else if (_LlmValue(text_config, "model").empty()) {
               err_msg = L"配置缺少 model";
+            } else if (_LlmValue(text_config, "prompt_both").empty()) {
+              err_msg = L"配置缺少 prompt_both";
+            } else if (_LlmValue(text_config, "prompt_initials_only").empty()) {
+              err_msg = L"配置缺少 prompt_initials_only";
             }
           }
           session_status.llm_candidates = {{err_msg, L"✦ 错误"}};
@@ -953,24 +961,6 @@ void RimeWithWeaselHandler::_StartLlmWorker(SessionStatus& session_status,
       _DecodePromptEscapes(_LlmValue(text_config, "prompt_both"));
   std::string prompt_initials_only =
       _DecodePromptEscapes(_LlmValue(text_config, "prompt_initials_only"));
-  if (prompt_both.empty()) {
-    prompt_both =
-        "你是中文输入法候选生成器，不是聊天助手。\n"
-        "用户本次输入只可能采用 phonetic 或 initials 中的一种。\n"
-        "请结合 context 语义，返回一个 JSON 对象，包含 predictions "
-        "数组（符合输入编码的精确匹配词句）"
-        "和 continuations 数组（结合 context "
-        "和输入的自然语言后续扩展续写）。只返回纯 JSON。";
-  }
-  if (prompt_initials_only.empty()) {
-    prompt_initials_only =
-        "你是中文输入法候选生成器，不是聊天助手。\n"
-        "本次只有 initials 是有效输入解释。\n"
-        "请结合 context 语义，返回一个 JSON 对象，包含 predictions 数组（符合 "
-        "initials 的精确匹配词句）"
-        "和 continuations 数组（结合 context "
-        "和输入的自然语言后续扩展续写）。只返回纯 JSON。";
-  }
   const int timeout_ms =
       std::clamp(_LlmInt(text_config, "timeout_ms", 3000), 500, 30000);
   const int candidate_count =
@@ -988,6 +978,17 @@ void RimeWithWeaselHandler::_StartLlmWorker(SessionStatus& session_status,
       std::clamp(_LlmDouble(text_config, "temperature", 0.0), 0.0, 2.0);
   const bool show_ai_comment =
       _LlmBool(text_config, "ai_comment_enabled", true);
+  std::string debug_context_mode =
+      _LlmValue(text_config, "debug_context", "off");
+  std::transform(debug_context_mode.begin(), debug_context_mode.end(),
+                 debug_context_mode.begin(),
+                 [](unsigned char c) { return static_cast<char>(tolower(c)); });
+  if (debug_context_mode != "preview" && debug_context_mode != "full")
+    debug_context_mode = "off";
+  const int debug_context_preview_chars = std::clamp(
+      _LlmInt(text_config, "debug_context_preview_chars", 100), 0, 2000);
+  const std::wstring debug_log_path =
+      (WeaselUserDataPath() / L"llm_debug.log").wstring();
 
   const DWORD ipc_id_snapshot = ipc_id;
   const std::wstring request_snapshot = session_status.llm_request_id;
@@ -1022,7 +1023,8 @@ void RimeWithWeaselHandler::_StartLlmWorker(SessionStatus& session_status,
          prompt_both, prompt_initials_only, predict_comment,
          continuation_comment, continuation_count, timeout_ms, temperature,
          candidate_count, cache_enabled = !!cache_enabled, cache_ttl_seconds,
-         cache_max_entries]() {
+         cache_max_entries, debug_log_path, debug_context_mode,
+         debug_context_preview_chars]() {
           try {
             auto response = weasel_llm::RequestCandidates(
                 u8tow(base_url), u8tow(model), u8tow(api_key),
@@ -1030,7 +1032,8 @@ void RimeWithWeaselHandler::_StartLlmWorker(SessionStatus& session_status,
                 u8tow(predict_comment), u8tow(continuation_comment),
                 continuation_count, context_snapshot, input_snapshot,
                 timeout_ms, temperature, candidate_count, cache_enabled,
-                cache_ttl_seconds, cache_max_entries);
+                cache_ttl_seconds, cache_max_entries, debug_log_path,
+                debug_context_mode, debug_context_preview_chars);
             std::vector<LlmCandidateItem> converted;
             if (response.success) {
               converted.reserve(response.candidates.size());

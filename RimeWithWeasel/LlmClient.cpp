@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <mutex>
 #include <set>
@@ -21,6 +23,7 @@ using CachedResult = std::pair<std::chrono::steady_clock::time_point,
                                std::vector<CandidateItem>>;
 std::mutex g_cache_mutex;
 std::map<std::string, CachedResult> g_cache;
+std::mutex g_debug_log_mutex;
 
 const std::set<std::string>& Syllables() {
   static const std::set<std::string> values = [] {
@@ -163,6 +166,42 @@ std::string JsonString(const std::string& value) {
   }
   out << '"';
   return out.str();
+}
+
+void WriteContextDebugLog(const std::wstring& log_path,
+                          const std::string& mode,
+                          int preview_chars,
+                          const std::wstring& context,
+                          const InputPaths& input) {
+  if (log_path.empty() || (mode != "preview" && mode != "full"))
+    return;
+
+  const bool full = mode == "full";
+  const size_t preview_length =
+      preview_chars > 0 ? static_cast<size_t>(preview_chars) : 0;
+  const bool truncated = !full && context.size() > preview_length;
+  const std::wstring visible_context =
+      truncated ? context.substr(context.size() - preview_length) : context;
+  const auto now = std::chrono::system_clock::now().time_since_epoch();
+  const auto timestamp_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+
+  std::string record =
+      "{\"timestamp_ms\":" + std::to_string(timestamp_ms) +
+      ",\"mode\":" + JsonString(mode) +
+      ",\"context_length_utf16\":" + std::to_string(context.size()) +
+      ",\"context_truncated\":" + (truncated ? "true" : "false") +
+      (full ? ",\"context\":" : ",\"context_tail\":") +
+      JsonString(Utf8(visible_context)) +
+      ",\"raw_input\":" + JsonString(input.raw_input) + ",\"phonetic\":" +
+      (input.has_phonetic ? JsonString(input.phonetic) : "null") +
+      ",\"initials\":" + JsonString(input.initials) + "}";
+
+  std::lock_guard<std::mutex> lock(g_debug_log_mutex);
+  std::ofstream log(std::filesystem::path(log_path),
+                    std::ios::binary | std::ios::app);
+  if (log)
+    log << record << '\n';
 }
 
 static LlmResponse ParseResponse(
@@ -411,7 +450,10 @@ LlmResponse RequestCandidates(const std::wstring& base_url,
                               int candidate_count,
                               bool cache_enabled,
                               int cache_ttl_seconds,
-                              int cache_max_entries) {
+                              int cache_max_entries,
+                              const std::wstring& debug_log_path,
+                              const std::string& debug_context_mode,
+                              int debug_context_preview_chars) {
   const std::string cache_key =
       Utf8(base_url) + "\n" + Utf8(model) + "\n" + Utf8(prompt_both) + "\n" +
       Utf8(prompt_initials_only) + "\n" + Utf8(default_predict_comment) + "\n" +
@@ -540,6 +582,8 @@ LlmResponse RequestCandidates(const std::wstring& base_url,
     }
     return {false, err_msg, {}};
   }
+  WriteContextDebugLog(debug_log_path, debug_context_mode,
+                       debug_context_preview_chars, context, input);
 
   bool received = WinHttpReceiveResponse(request, nullptr);
   if (!received) {
