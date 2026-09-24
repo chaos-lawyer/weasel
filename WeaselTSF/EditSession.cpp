@@ -95,9 +95,8 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
   _UpdateUI(*context, _status);
 
   if (_llm_timer_id) {
-    if (context->candies.empty() ||
-        (!context->candies.empty() &&
-         context->candies[0].str != L"AI分析中...")) {
+    if (context->cinfo.candies.empty() ||
+        context->cinfo.candies[0].str != L"AI分析中...") {
       _StopLlmPolling();
     }
   }
