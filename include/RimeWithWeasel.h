@@ -48,6 +48,7 @@ struct SessionStatus {
         llm_request_submitted(false),
         llm_loading(false),
         llm_is_error(false),
+        llm_page_active(true),
         llm_ai_comment_enabled(false),
         llm_ai_comment() {
     RIME_STRUCT(RimeStatus, status);
@@ -71,9 +72,13 @@ struct SessionStatus {
   bool llm_request_submitted;
   bool llm_loading;
   bool llm_is_error;
+  bool llm_page_active;
   bool llm_ai_comment_enabled;
   std::wstring llm_ai_comment;
   std::wstring llm_context;
+  unsigned int llm_context_polls = 0;
+  std::wstring llm_context_diagnostic;
+  std::wstring llm_recent_commits;
   std::vector<LlmCandidateItem> llm_candidates;
   std::wstring llm_commit_text;
 };
@@ -104,7 +109,8 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   virtual void SubmitLlmContext(WeaselSessionId ipc_id,
                                 const std::wstring& request_id,
                                 const std::wstring& context,
-                                EatLine eat = 0);
+                                EatLine eat = 0,
+                                const std::wstring& diagnostic = L"");
   virtual bool PollSession(WeaselSessionId ipc_id, EatLine eat = 0);
   virtual void RefreshSession(DWORD ipc_id);
   virtual void UpdateInputPosition(RECT const& rc, WeaselSessionId ipc_id);

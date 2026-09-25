@@ -86,7 +86,8 @@ struct RequestHandler {
   virtual void SubmitLlmContext(DWORD session_id,
                                 const std::wstring& request_id,
                                 const std::wstring& context,
-                                EatLine eat = 0) {}
+                                EatLine eat = 0,
+                                const std::wstring& diagnostic = L"") {}
   virtual bool PollSession(DWORD session_id, EatLine eat = 0) { return false; }
   virtual void RefreshSession(DWORD session_id) {}
   virtual void UpdateInputPosition(RECT const& rc, DWORD session_id) {}
@@ -136,7 +137,8 @@ class Client {
   // 请求服务处理按键消息
   bool ProcessKeyEvent(KeyEvent const& keyEvent);
   bool SubmitLlmContext(const std::wstring& request_id,
-                        const std::wstring& context);
+                        const std::wstring& context,
+                        const std::wstring& diagnostic = L"");
   bool PollSession();
   // 上屏正在編輯的文字
   bool CommitComposition();

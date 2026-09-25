@@ -407,7 +407,8 @@ DWORD ServerImpl::OnLlmContext(WEASEL_IPC_COMMAND uMsg,
     *channel << msg;
     return true;
   };
-  m_pRequestHandler->SubmitLlmContext(lParam, request_id, context, eat);
+  m_pRequestHandler->SubmitLlmContext(lParam, request_id, context, eat,
+                                      read_field(L"llm.diagnostic"));
   return 1;
 }
 

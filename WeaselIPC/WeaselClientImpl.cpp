@@ -65,11 +65,13 @@ bool ClientImpl::ProcessKeyEvent(KeyEvent const& keyEvent) {
 }
 
 bool ClientImpl::SubmitLlmContext(const std::wstring& request_id,
-                                  const std::wstring& context) {
+                                  const std::wstring& context,
+                                  const std::wstring& diagnostic) {
   if (!_Active())
     return false;
   channel << L"llm.request_id=" << escape_string(request_id) << L"\n"
-          << L"llm.context=" << escape_string(context) << L"\n.\n";
+          << L"llm.context=" << escape_string(context) << L"\n"
+          << L"llm.diagnostic=" << escape_string(diagnostic) << L"\n.\n";
   return _SendMessage(WEASEL_IPC_LLM_CONTEXT, 0, session_id) != 0;
 }
 
@@ -240,8 +242,9 @@ bool Client::ProcessKeyEvent(KeyEvent const& keyEvent) {
 }
 
 bool Client::SubmitLlmContext(const std::wstring& request_id,
-                              const std::wstring& context) {
-  return m_pImpl->SubmitLlmContext(request_id, context);
+                              const std::wstring& context,
+                              const std::wstring& diagnostic) {
+  return m_pImpl->SubmitLlmContext(request_id, context, diagnostic);
 }
 
 bool Client::PollSession() {

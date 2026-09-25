@@ -19,7 +19,8 @@ class ClientImpl {
   bool Echo();
   bool ProcessKeyEvent(KeyEvent const& keyEvent);
   bool SubmitLlmContext(const std::wstring& request_id,
-                        const std::wstring& context);
+                        const std::wstring& context,
+                        const std::wstring& diagnostic = L"");
   bool PollSession();
   bool CommitComposition();
   bool ClearComposition();

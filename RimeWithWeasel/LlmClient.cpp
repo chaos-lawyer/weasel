@@ -172,7 +172,9 @@ void WriteContextDebugLog(const std::wstring& log_path,
                           const std::string& mode,
                           int preview_chars,
                           const std::wstring& context,
-                          const InputPaths& input) {
+                          const InputPaths& input,
+                          const std::string& source,
+                          const std::wstring& diagnostic) {
   if (log_path.empty() || (mode != "preview" && mode != "full"))
     return;
 
@@ -187,7 +189,9 @@ void WriteContextDebugLog(const std::wstring& log_path,
       std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
 
   std::string record =
-      "{\"timestamp_ms\":" + std::to_string(timestamp_ms) +
+      "{\"context_source\":" + JsonString(source) +
+      ",\"context_diagnostic\":" + JsonString(Utf8(diagnostic)) +
+      ",\"timestamp_ms\":" + std::to_string(timestamp_ms) +
       ",\"mode\":" + JsonString(mode) +
       ",\"context_length_utf16\":" + std::to_string(context.size()) +
       ",\"context_truncated\":" + (truncated ? "true" : "false") +
@@ -453,7 +457,9 @@ LlmResponse RequestCandidates(const std::wstring& base_url,
                               int cache_max_entries,
                               const std::wstring& debug_log_path,
                               const std::string& debug_context_mode,
-                              int debug_context_preview_chars) {
+                              int debug_context_preview_chars,
+                              const std::string& context_source,
+                              const std::wstring& context_diagnostic) {
   const std::string cache_key =
       Utf8(base_url) + "\n" + Utf8(model) + "\n" + Utf8(prompt_both) + "\n" +
       Utf8(prompt_initials_only) + "\n" + Utf8(default_predict_comment) + "\n" +
@@ -583,7 +589,8 @@ LlmResponse RequestCandidates(const std::wstring& base_url,
     return {false, err_msg, {}};
   }
   WriteContextDebugLog(debug_log_path, debug_context_mode,
-                       debug_context_preview_chars, context, input);
+                       debug_context_preview_chars, context, input,
+                       context_source, context_diagnostic);
 
   bool received = WinHttpReceiveResponse(request, nullptr);
   if (!received) {

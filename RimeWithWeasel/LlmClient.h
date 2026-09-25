@@ -44,5 +44,7 @@ LlmResponse RequestCandidates(const std::wstring& base_url,
                               int cache_max_entries,
                               const std::wstring& debug_log_path,
                               const std::string& debug_context_mode,
-                              int debug_context_preview_chars);
+                              int debug_context_preview_chars,
+                              const std::string& context_source,
+                              const std::wstring& context_diagnostic);
 }  // namespace weasel_llm

@@ -18,13 +18,14 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
 
   if (ok && !llm_trigger.request_id.empty()) {
     std::wstring prefix_context;
+    std::wstring diagnostic = L"context_disabled";
     if (llm_trigger.context_enabled) {
       const LONG context_chars =
           std::clamp(static_cast<LONG>(llm_trigger.context_chars), 0L, 2000L);
       const LONG search_chars = std::clamp(
           static_cast<LONG>(llm_trigger.boundary_search_chars), 0L, 500L);
       std::wstring raw_context = _ReadTextBeforeCaret(
-          ec, _pEditSessionContext, context_chars + search_chars);
+          ec, _pEditSessionContext, context_chars + search_chars, diagnostic);
       if (static_cast<LONG>(raw_context.size()) > context_chars) {
         const size_t cut = raw_context.size() - context_chars;
         const size_t limit = (cut + search_chars < raw_context.size())
@@ -48,7 +49,8 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
       }
       prefix_context = std::move(raw_context);
     }
-    m_client.SubmitLlmContext(llm_trigger.request_id, prefix_context);
+    m_client.SubmitLlmContext(llm_trigger.request_id, prefix_context,
+                              diagnostic);
     _StartLlmPolling(_pEditSessionContext);
   }
 
@@ -109,39 +111,53 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
 
 std::wstring WeaselTSF::_ReadTextBeforeCaret(TfEditCookie ec,
                                              ITfContext* pContext,
-                                             LONG maxChars) {
-  if (!pContext || maxChars <= 0)
-    return std::wstring();
-
-  TF_SELECTION selection = {};
-  ULONG fetched = 0;
-  if (FAILED(pContext->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &selection,
-                                    &fetched)) ||
-      fetched == 0 || !selection.range) {
-    return std::wstring();
+                                             LONG maxChars,
+                                             std::wstring& diagnostic) {
+  diagnostic.clear();
+  const auto record = [&diagnostic](const wchar_t* stage, HRESULT hr) {
+    diagnostic += std::wstring(stage) + L"=" +
+                  std::to_wstring(static_cast<unsigned long>(hr)) + L";";
+    return SUCCEEDED(hr);
+  };
+  if (!pContext || maxChars <= 0) {
+    diagnostic = !pContext ? L"null_context" : L"zero_limit";
+    return {};
   }
-
   com_ptr<ITfRange> range;
-  ITfRange* cloned_range = nullptr;
-  const HRESULT clone_result = selection.range->Clone(&cloned_range);
-  selection.range->Release();
-  if (FAILED(clone_result) || !cloned_range)
-    return std::wstring();
-  range.Attach(cloned_range);
-  const TfAnchor anchor =
-      selection.style.ase == TF_AE_START ? TF_ANCHOR_START : TF_ANCHOR_END;
-  if (FAILED(range->Collapse(ec, anchor)))
-    return std::wstring();
-
-  LONG shifted = 0;
-  if (FAILED(range->ShiftStart(ec, -maxChars, &shifted, nullptr)))
-    return std::wstring();
-
-  std::vector<WCHAR> buffer(static_cast<size_t>(maxChars) + 1, L'\0');
-  ULONG charsRead = 0;
-  if (FAILED(range->GetText(ec, 0, buffer.data(),
-                            static_cast<ULONG>(buffer.size()), &charsRead))) {
-    return std::wstring();
+  // Read before the composition, excluding inline preedit text. Selection may
+  // point inside that temporary text instead of at the committed-text boundary.
+  if (_pComposition) {
+    ITfRange* composition_range = nullptr;
+    HRESULT hr = _pComposition->GetRange(&composition_range);
+    record(L"CompositionRange", hr);
+    if (SUCCEEDED(hr) && composition_range)
+      range.Attach(composition_range);
   }
-  return std::wstring(buffer.data(), charsRead);
+  if (!range) {
+    TF_SELECTION selection = {};
+    ULONG fetched = 0;
+    HRESULT hr = pContext->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &selection,
+                                        &fetched);
+    record(L"GetSelection", hr);
+    diagnostic += L"fetched=" + std::to_wstring(fetched) + L";";
+    if (selection.range)
+      range.Attach(selection.range);
+    if (FAILED(hr) || !fetched || !range)
+      return {};
+  }
+  if (!record(L"Collapse", range->Collapse(ec, TF_ANCHOR_START)))
+    return {};
+  LONG shifted = 0;
+  if (!record(L"ShiftStart",
+              range->ShiftStart(ec, -maxChars, &shifted, nullptr)))
+    return {};
+  diagnostic += L"shifted=" + std::to_wstring(shifted) + L";";
+  std::vector<WCHAR> buffer(static_cast<size_t>(maxChars));
+  ULONG chars_read = 0;
+  if (!record(L"GetText",
+              range->GetText(ec, 0, buffer.data(),
+                             static_cast<ULONG>(buffer.size()), &chars_read)))
+    return {};
+  diagnostic += L"read=" + std::to_wstring(chars_read) + L";";
+  return std::wstring(buffer.data(), chars_read);
 }
