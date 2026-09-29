@@ -59,6 +59,15 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
   bool compositionEnded = false;
   if (ok) {
     compositionEnded = false;
+    if (!context->undo_action.empty()) {
+      if (context->undo_action == L"ctrl_z") {
+        if (_IsComposing()) {
+          _EndComposition(_pEditSessionContext, true);
+          compositionEnded = true;
+        }
+        _SimulateUndo();
+      }
+    }
     if (!commit.empty()) {
       // For auto-selecting, commit and preedit can both exist.
       // Commit the old TSF composition. If Rime immediately has a new

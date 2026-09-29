@@ -1969,6 +1969,17 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
         .append(L"\n");
   }
 
+  char undo_action[64] = {0};
+  if (rime_api->get_property(session_id, "undo_action", undo_action,
+                             sizeof(undo_action)) &&
+      undo_action[0] != '\0') {
+    rime_api->set_property(session_id, "undo_action", "");
+    if (std::find(actions.begin(), actions.end(), "ctx") == actions.end()) {
+      actions.push_back("ctx");
+    }
+    body.append(L"ctx.undo=").append(u8tow(undo_action)).append(L"\n");
+  }
+
   // configuration information
   actions.push_back("config");
   body.append(L"config.inline_preedit=")

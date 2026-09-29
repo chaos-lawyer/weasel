@@ -44,6 +44,11 @@ void ContextUpdater::Store(Deserializer::KeyType const& k,
     return;
   }
 
+  if (k[1] == L"undo") {
+    m_pTarget->p_context->undo_action = unescape_string(value);
+    return;
+  }
+
   if (k[1] == L"llm" && m_pTarget->p_llm_trigger && k.size() == 3) {
     if (k[2] == L"request_id") {
       m_pTarget->p_llm_trigger->request_id = unescape_string(value);

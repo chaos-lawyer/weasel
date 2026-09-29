@@ -139,10 +139,12 @@ struct Context {
     preedit.clear();
     aux.clear();
     cinfo.clear();
+    undo_action.clear();
   }
   bool empty() const { return preedit.empty() && aux.empty() && cinfo.empty(); }
   bool operator==(const Context& ctx) {
-    if (preedit == ctx.preedit && aux == ctx.aux && cinfo == ctx.cinfo)
+    if (preedit == ctx.preedit && aux == ctx.aux && cinfo == ctx.cinfo &&
+        undo_action == ctx.undo_action)
       return true;
     return false;
   }
@@ -158,6 +160,7 @@ struct Context {
   Text preedit;
   Text aux;
   CandidateInfo cinfo;
+  std::wstring undo_action;
 };
 // for icon type in tip
 enum IconType { SCHEMA, FULL_SHAPE };

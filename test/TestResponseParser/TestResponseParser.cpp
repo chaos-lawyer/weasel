@@ -1,4 +1,4 @@
-﻿// TestResponseParser.cpp : Defines the entry point for the console application.
+// TestResponseParser.cpp : Defines the entry point for the console application.
 //
 
 #include "stdafx.h"
@@ -85,11 +85,25 @@ void test_4() {
   BOOST_TEST_EQ(1, c.totalPages);
 }
 
+void test_5() {
+  WCHAR resp[] =
+      L"action=ctx\n"
+      L"ctx.undo=ctrl_z\n";
+  DWORD len = wcslen(resp);
+  std::wstring commit;
+  weasel::Context ctx;
+  weasel::Status status;
+  weasel::ResponseParser parser(&commit, &ctx, &status);
+  parser(resp, len);
+  BOOST_TEST(ctx.undo_action == L"ctrl_z");
+}
+
 int _tmain(int argc, _TCHAR* argv[]) {
   test_1();
   test_2();
   test_3();
   test_4();
+  test_5();
 
   system("pause");
   return boost::report_errors();

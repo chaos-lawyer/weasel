@@ -34,6 +34,12 @@ void WeaselTSF::_ProcessKeyEvent(WPARAM wParam, LPARAM lParam, BOOL* pfEaten) {
       else if (ke.keycode == ibus::Down)
         ke.keycode = ibus::Up;
     }
+    if (!(ke.mask & ibus::RELEASE_MASK) && _simulated_keys_to_skip > 0) {
+      --_simulated_keys_to_skip;
+      *pfEaten = FALSE;
+      return;
+    }
+
     if (!keyCountToSimulate)
       *pfEaten = (BOOL)m_client.ProcessKeyEvent(ke);
 
@@ -199,3 +205,19 @@ BOOL WeaselTSF::_InitPreservedKey() {
 }
 
 void WeaselTSF::_UninitPreservedKey() {}
+
+void WeaselTSF::_SimulateUndo() {
+  _simulated_keys_to_skip = 2;
+  INPUT inputs[4] = {};
+  inputs[0].type = INPUT_KEYBOARD;
+  inputs[0].ki.wVk = VK_CONTROL;
+  inputs[1].type = INPUT_KEYBOARD;
+  inputs[1].ki.wVk = 'Z';
+  inputs[2].type = INPUT_KEYBOARD;
+  inputs[2].ki.wVk = 'Z';
+  inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+  inputs[3].type = INPUT_KEYBOARD;
+  inputs[3].ki.wVk = VK_CONTROL;
+  inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+  ::SendInput(sizeof(inputs) / sizeof(INPUT), inputs, sizeof(INPUT));
+}

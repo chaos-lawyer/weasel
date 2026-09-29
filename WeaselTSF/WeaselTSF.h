@@ -150,6 +150,9 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   void _StopLlmPolling();
   void _OnLlmTimer(UINT_PTR timer_id);
 
+  /* Undo simulation */
+  void _SimulateUndo();
+
   /* Display Attribute */
   void _ClearCompositionDisplayAttributes(TfEditCookie ec,
                                           _In_ ITfContext* pContext);
@@ -247,4 +250,5 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   BOOL _isToOpenClose = false;
   UINT_PTR _llm_timer_id = 0;
   int _llm_poll_ticks = 0;
+  int _simulated_keys_to_skip = 0;
 };
