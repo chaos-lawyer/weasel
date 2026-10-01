@@ -20,21 +20,34 @@ bool WeaselTSF::_ProcessKeyEvent(ITfContext* pContext,
                                  BOOL* pfEaten) {
   const ULONG_PTR inputTag = static_cast<ULONG_PTR>(GetMessageExtraInfo());
   const bool keyUp = KeyInfo(lParam).isKeyUp;
-  if ((inputTag & kUndoInputMarkerMask) == kUndoInputMarker &&
-      (wParam == VK_CONTROL || wParam == 'Z' || wParam == VK_F24)) {
-    // Bypass Rime for the entire Ctrl+Z sequence, including both key-ups.
-    // The tagged F24 marker is private and must never reach the host app.
+  const bool tagged = (inputTag & kUndoInputMarkerMask) == kUndoInputMarker;
+  const bool undoKey =
+      wParam == VK_CONTROL || wParam == 'Z' || wParam == VK_F24;
+  // TSF callbacks need not retain the message queue's dwExtraInfo. Track the
+  // queued shortcut until its marker arrives instead of treating its Ctrl/Z
+  // events as user input when the tag is unavailable.
+  if ((tagged && undoKey) || (_undo_input_active && undoKey) ||
+      (_undo_marker_release && wParam == VK_F24)) {
     *pfEaten = (wParam == VK_F24);
-    if (wParam == VK_F24 && !keyUp && inputTag == _undo_input_tag) {
-      const bool resume =
-          _undo_context == pContext && _undo_focus == GetFocus();
-      _CancelUndo();
-      if (resume && _IsKeyboardOpen() && !_IsKeyboardDisabled()) {
-        // F35 is a configuration notification, not a Windows keystroke.
-        m_client.ProcessKeyEvent(weasel::KeyEvent(ibus::F35, 0));
-        return true;
+    if (wParam == VK_F24) {
+      if (keyUp) {
+        _undo_marker_release = false;
+      } else if (_undo_input_active &&
+                 (!tagged || !_undo_input_tag || inputTag == _undo_input_tag)) {
+        const bool resume = _undo_input_tag && _undo_context == pContext &&
+                            _undo_focus == GetFocus();
+        _undo_input_active = false;
+        _undo_marker_release = true;
+        _CancelUndo();
+        if (resume && (!_isToOpenClose || _IsKeyboardOpen()) &&
+            !_IsKeyboardDisabled()) {
+          // F35 is a configuration notification, not a Windows keystroke.
+          m_client.ProcessKeyEvent(weasel::KeyEvent(ibus::F35, 0));
+          return true;
+        }
       }
     }
+    // No new IPC response: do not replay the cached undo request or preedit.
     return false;
   }
   if (!keyUp)
@@ -198,6 +211,8 @@ BOOL WeaselTSF::_InitKeyEventSink() {
 
 void WeaselTSF::_UninitKeyEventSink() {
   _CancelUndo();
+  _undo_input_active = false;
+  _undo_marker_release = false;
   com_ptr<ITfKeystrokeMgr> pKeystrokeMgr;
 
   if (_pThreadMgr->QueryInterface(&pKeystrokeMgr) != S_OK)
@@ -238,6 +253,8 @@ void WeaselTSF::_CancelUndo() {
 }
 
 void WeaselTSF::_RequestUndo(com_ptr<ITfContext> pContext) {
+  if (_undo_input_active || _undo_marker_release)
+    return;
   _undo_input_tag = kUndoInputMarker | (++undoInputSerial & 0xffff);
   _undo_context = pContext;
   _undo_focus = GetFocus();
@@ -276,11 +293,16 @@ void WeaselTSF::_SimulateUndo(ULONG_PTR inputTag) {
   inputs[4].ki.wVk = VK_F24;
   inputs[5].ki.wVk = VK_F24;
   inputs[5].ki.dwFlags = KEYEVENTF_KEYUP;
+  _undo_input_active = true;
   const UINT sent = ::SendInput(6, inputs, sizeof(INPUT));
   if (sent != 6) {
     _CancelUndo();
+    _undo_input_active = false;
+    _undo_marker_release = (sent == 5);
     // A partially injected shortcut must not leave Ctrl or Z held down.
     if (sent > 0 && sent < 4)
       ::SendInput(2, inputs + 2, sizeof(INPUT));
+    else if (sent == 5)
+      ::SendInput(1, inputs + 5, sizeof(INPUT));
   }
 }

@@ -447,6 +447,7 @@ STDMETHODIMP WeaselTSF::OnCompositionTerminated(TfEditCookie ecWrite,
 }
 
 void WeaselTSF::_AbortComposition(bool clear) {
+  _StopCloudPolling();
   _CancelUndo();
   m_client.ClearComposition();
   _status.composing = false;

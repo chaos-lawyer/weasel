@@ -11,6 +11,7 @@ STDMETHODIMP WeaselTSF::OnUninitDocumentMgr(ITfDocumentMgr* pDocMgr) {
 
 STDMETHODIMP WeaselTSF::OnSetFocus(ITfDocumentMgr* pDocMgrFocus,
                                    ITfDocumentMgr* pDocMgrPrevFocus) {
+  _StopCloudPolling();
   _InitTextEditSink(pDocMgrFocus);
 
   com_ptr<ITfDocumentMgr> pCandidateListDocumentMgr;

@@ -98,12 +98,29 @@ void test_5() {
   BOOST_TEST(ctx.undo_action == L"ctrl_z");
 }
 
+void test_cloud_pending() {
+  WCHAR waiting[] = L"action=ctx\nctx.cloud_pending=1\n";
+  WCHAR ready[] = L"action=ctx\nctx.cloud_pending=0\n";
+  weasel::Context ctx;
+  weasel::ResponseParser parser(nullptr, &ctx, nullptr);
+  parser(waiting, wcslen(waiting));
+  BOOST_TEST(ctx.cloud_pending);
+  weasel::Context cleared;
+  BOOST_TEST(ctx != cleared);
+  parser(ready, wcslen(ready));
+  BOOST_TEST(!ctx.cloud_pending);
+  parser(waiting, wcslen(waiting));
+  ctx.clear();
+  BOOST_TEST(!ctx.cloud_pending);
+}
+
 int _tmain(int argc, _TCHAR* argv[]) {
   test_1();
   test_2();
   test_3();
   test_4();
   test_5();
+  test_cloud_pending();
 
   system("pause");
   return boost::report_errors();

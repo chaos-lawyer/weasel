@@ -2,6 +2,7 @@
 #include "WeaselTSF.h"
 #include "CandidateList.h"
 #include "ResponseParser.h"
+#include "EditSession.h"
 
 STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
   // get commit string from server
@@ -21,6 +22,7 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
     if (context->undo_action == L"ctrl_z") {
       // The configuration resumes through F35 after the tagged undo input.
       // Never start a replacement composition in the undo request session.
+      _StopCloudPolling();
       _RequestUndo(_pEditSessionContext);
       _UpdateUI(*context, _status);
       return TRUE;
@@ -63,6 +65,66 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
   // still updated by the queued read session after the new composition is
   // created.
   _UpdateUI(*context, _status);
+  if (ok && context->cloud_pending && _status.composing)
+    _StartCloudPolling(_pEditSessionContext);
+  else
+    _StopCloudPolling();
 
   return TRUE;
+}
+
+namespace {
+class CloudPollingEditSession : public CEditSession {
+ public:
+  CloudPollingEditSession(com_ptr<WeaselTSF> service,
+                          com_ptr<ITfContext> context,
+                          UINT_PTR timer_id)
+      : CEditSession(service, context), timer_id_(timer_id) {}
+  STDMETHODIMP DoEditSession(TfEditCookie ec) override {
+    return _pTextService->_PollCloudCandidates(ec, _pContext, timer_id_);
+  }
+
+ private:
+  UINT_PTR timer_id_;
+};
+}  // namespace
+
+void WeaselTSF::_OnCloudTimer(UINT_PTR timer_id) {
+  if (timer_id != _cloud_timer_id)
+    return;
+  if (!_status.composing || !_cloud_context || _cloud_focus != GetFocus() ||
+      GetTickCount64() - _cloud_poll_started > 5000) {
+    _StopCloudPolling();
+    return;
+  }
+  if (_cloud_poll_queued)
+    return;
+  _cloud_poll_queued = true;
+  com_ptr<CloudPollingEditSession> session;
+  session.Attach(new CloudPollingEditSession(this, _cloud_context, timer_id));
+  HRESULT result = E_FAIL;
+  const HRESULT hr = _cloud_context->RequestEditSession(
+      _tfClientId, session, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE, &result);
+  if (FAILED(hr) || FAILED(result))
+    _StopCloudPolling();
+}
+
+HRESULT WeaselTSF::_PollCloudCandidates(TfEditCookie ec,
+                                        com_ptr<ITfContext> context,
+                                        UINT_PTR timer_id) {
+  if (timer_id != _cloud_timer_id || context != _cloud_context)
+    return S_FALSE;
+  _cloud_poll_queued = false;
+  if (!_status.composing || _cloud_focus != GetFocus() ||
+      context != _pEditSessionContext) {
+    _StopCloudPolling();
+    return S_FALSE;
+  }
+  // Request and consume the response inside the same edit session, so a queued
+  // callback cannot overwrite another key's cached IPC response.
+  if (!m_client.ProcessKeyEvent(weasel::KeyEvent(ibus::F34, 0))) {
+    _StopCloudPolling();
+    return S_FALSE;
+  }
+  return DoEditSession(ec);
 }

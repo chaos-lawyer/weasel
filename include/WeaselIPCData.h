@@ -140,11 +140,12 @@ struct Context {
     aux.clear();
     cinfo.clear();
     undo_action.clear();
+    cloud_pending = false;
   }
   bool empty() const { return preedit.empty() && aux.empty() && cinfo.empty(); }
   bool operator==(const Context& ctx) {
     if (preedit == ctx.preedit && aux == ctx.aux && cinfo == ctx.cinfo &&
-        undo_action == ctx.undo_action)
+        undo_action == ctx.undo_action && cloud_pending == ctx.cloud_pending)
       return true;
     return false;
   }
@@ -161,6 +162,7 @@ struct Context {
   Text aux;
   CandidateInfo cinfo;
   std::wstring undo_action;
+  bool cloud_pending = false;
 };
 // for icon type in tip
 enum IconType { SCHEMA, FULL_SHAPE };

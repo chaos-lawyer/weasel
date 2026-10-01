@@ -38,6 +38,7 @@ WeaselTSF::WeaselTSF() {
 }
 
 WeaselTSF::~WeaselTSF() {
+  _StopCloudPolling();
   DllRelease();
 }
 
@@ -97,6 +98,7 @@ STDMETHODIMP WeaselTSF::Activate(ITfThreadMgr* pThreadMgr,
 }
 
 STDMETHODIMP WeaselTSF::Deactivate() {
+  _StopCloudPolling();
   m_client.EndSession();
 
   _InitTextEditSink(com_ptr<ITfDocumentMgr>());
@@ -168,6 +170,40 @@ STDMETHODIMP WeaselTSF::ActivateEx(ITfThreadMgr* pThreadMgr,
 ExitError:
   Deactivate();
   return E_FAIL;
+}
+
+namespace {
+thread_local std::map<UINT_PTR, WeaselTSF*> cloud_timers;
+}
+
+VOID CALLBACK WeaselTSF::_CloudTimerProc(HWND, UINT, UINT_PTR id, DWORD) {
+  const auto it = cloud_timers.find(id);
+  if (it != cloud_timers.end())
+    it->second->_OnCloudTimer(id);
+}
+
+void WeaselTSF::_StartCloudPolling(com_ptr<ITfContext> context) {
+  if (_cloud_timer_id && _cloud_context == context)
+    return;
+  _StopCloudPolling();
+  _cloud_context = context;
+  _cloud_focus = GetFocus();
+  _cloud_poll_started = GetTickCount64();
+  _cloud_timer_id = SetTimer(nullptr, 0, 80, _CloudTimerProc);
+  if (_cloud_timer_id)
+    cloud_timers[_cloud_timer_id] = this;
+  else
+    _cloud_context = nullptr;
+}
+
+void WeaselTSF::_StopCloudPolling() {
+  if (_cloud_timer_id) {
+    KillTimer(nullptr, _cloud_timer_id);
+    cloud_timers.erase(_cloud_timer_id);
+    _cloud_timer_id = 0;
+  }
+  _cloud_context = nullptr;
+  _cloud_poll_queued = false;
 }
 
 STDMETHODIMP WeaselTSF::OnSetThreadFocus() {

@@ -44,6 +44,11 @@ void ContextUpdater::Store(Deserializer::KeyType const& k,
     return;
   }
 
+  if (k[1] == L"cloud_pending") {
+    m_pTarget->p_context->cloud_pending = (value == L"1");
+    return;
+  }
+
   if (k[1] == L"undo") {
     m_pTarget->p_context->undo_action = unescape_string(value);
     return;

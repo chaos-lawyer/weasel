@@ -421,6 +421,22 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
   if (m_disabled)
     return FALSE;
   RimeSessionId session_id = to_session_id(ipc_id);
+  const std::string cloud_clock = std::to_string(GetTickCount64());
+  rime_api->set_property(session_id, "cloud_clock_ms", cloud_clock.c_str());
+  // F34 is an internal polling notification, never a typing/selection key.
+  if (keyEvent.keycode == ibus::F34 && keyEvent.mask == 0) {
+    char pending[8] = {0};
+    if (ipc_id == m_active_session &&
+        rime_api->get_property(session_id, "cloud_pending", pending,
+                               sizeof(pending)) &&
+        std::string(pending) == "1") {
+      rime_api->process_key(session_id, ibus::F34, 0);
+      _UpdateUI(ipc_id);
+    }
+    if (eat)
+      _Respond(ipc_id, eat);
+    return TRUE;
+  }
   SessionStatus& session_status = get_session_status(ipc_id);
   _RemapCandidateNavigationKey(session_status, session_id, keyEvent);
 
@@ -1209,6 +1225,14 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
     }
     rime_api->free_context(&ctx);
   }
+
+  char cloud_pending[8] = {0};
+  rime_api->get_property(session_id, "cloud_pending", cloud_pending,
+                         sizeof(cloud_pending));
+  if (std::find(actions.begin(), actions.end(), "ctx") == actions.end())
+    actions.push_back("ctx");
+  body.append(L"ctx.cloud_pending=")
+      .append(std::string(cloud_pending) == "1" ? L"1\n" : L"0\n");
 
   char undo_action[64] = {0};
   if (rime_api->get_property(session_id, "undo_action", undo_action,

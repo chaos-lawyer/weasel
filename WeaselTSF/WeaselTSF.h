@@ -142,6 +142,14 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   void _HideUI();
   com_ptr<ITfContext> _GetUIContextDocument();
 
+  /* Cloud candidates: owner-thread polling, only while work is pending. */
+  void _StartCloudPolling(com_ptr<ITfContext> context);
+  void _StopCloudPolling();
+  void _OnCloudTimer(UINT_PTR timer_id);
+  HRESULT _PollCloudCandidates(TfEditCookie ec,
+                               com_ptr<ITfContext> context,
+                               UINT_PTR timer_id);
+
   /* Undo simulation */
   void _RequestUndo(com_ptr<ITfContext> pContext);
   void _SimulateUndo(ULONG_PTR inputTag);
@@ -246,6 +254,14 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   BOOL _async_edit = false;
   BOOL _committed = false;
   BOOL _isToOpenClose = false;
+  static VOID CALLBACK _CloudTimerProc(HWND, UINT, UINT_PTR, DWORD);
+  UINT_PTR _cloud_timer_id = 0;
+  ULONGLONG _cloud_poll_started = 0;
+  bool _cloud_poll_queued = false;
+  HWND _cloud_focus = nullptr;
+  com_ptr<ITfContext> _cloud_context;
+  bool _undo_input_active = false;
+  bool _undo_marker_release = false;
   ULONG_PTR _undo_input_tag = 0;
   HWND _undo_focus = nullptr;
   com_ptr<ITfContext> _undo_context;
