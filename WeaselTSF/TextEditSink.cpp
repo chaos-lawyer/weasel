@@ -24,7 +24,8 @@ STDMETHODIMP WeaselTSF::OnEndEdit(ITfContext* pContext,
   // or the document no longer contains exactly the text we recorded.
   if (_last_commit_range && !_ValidateLastCommit(ecReadOnly, pContext)) {
     OutputDebugStringW(L"Weasel reopen: recorded range invalidated by edit\n");
-    _ForgetLastCommit();
+    if (!_DetectTransientReset(ecReadOnly, pContext))
+      _ForgetLastCommit();
   }
 
   BOOL fSelectionChanged;

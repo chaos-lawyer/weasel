@@ -19,12 +19,33 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
   bool compositionEnded = false;
   if (ok) {
     compositionEnded = false;
-    const std::wstring reopenPrefix = L"reopen_last_commit:";
+    std::wstring reopenPrefix = L"reopen_last_commit:";
+    const bool automatic =
+        context->undo_action.compare(0, reopenPrefix.size(), reopenPrefix) == 0;
+    const std::wstring rangePrefix = L"range_last_commit:";
+    const std::wstring backspacePrefix = L"backspace_last_commit:";
+    const bool backspace = context->undo_action.compare(
+                               0, backspacePrefix.size(), backspacePrefix) == 0;
+    if (backspace)
+      reopenPrefix = backspacePrefix;
+    else if (context->undo_action.compare(0, rangePrefix.size(), rangePrefix) ==
+             0)
+      reopenPrefix = rangePrefix;
     if (context->undo_action.compare(0, reopenPrefix.size(), reopenPrefix) ==
         0) {
       _StopCloudPolling();
-      if (_ReopenLastCommit(ec, _pEditSessionContext,
-                            context->undo_action.substr(reopenPrefix.size()))) {
+      const std::wstring text =
+          context->undo_action.substr(reopenPrefix.size());
+      if (backspace || (automatic && _backspace_range_lost)) {
+        if (!_RequestBackspace(ec, _pEditSessionContext, text)) {
+          OutputDebugStringW(L"Weasel reopen: backspace request refused\n");
+          _ForgetLastCommit();
+          _EndComposition(_pEditSessionContext, true);
+        }
+        _UpdateUI(*context, _status);
+        return TRUE;
+      }
+      if (_ReopenLastCommit(ec, _pEditSessionContext, text)) {
         // Deletion must reach the host before a separate edit session restores
         // composition and notifies configuration through F35.
         _UpdateUI(*context, _status);

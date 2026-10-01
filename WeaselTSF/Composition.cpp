@@ -484,6 +484,10 @@ void WeaselTSF::_ForgetLastCommit() {
   _last_commit_end = nullptr;
   _last_commit_context = nullptr;
   _last_commit_text.clear();
+  _InvalidateBackspace();
+  _backspace_context = nullptr;
+  _backspace_text.clear();
+  _backspace_range_lost = false;
 }
 
 void WeaselTSF::_RememberLastCommit(TfEditCookie ec,
@@ -506,7 +510,10 @@ void WeaselTSF::_RememberLastCommit(TfEditCookie ec,
   _last_commit_end = end;
   _last_commit_text = text;
   TF_STATUS status = {};
-  if (SUCCEEDED(context->GetStatus(&status))) {
+  const bool hasStatus = SUCCEEDED(context->GetStatus(&status));
+  _ArmBackspace(context, text,
+                hasStatus && (status.dwStaticFlags & TF_SS_TRANSITORY));
+  if (hasStatus) {
     OutputDebugStringW(
         status.dwStaticFlags & TF_SS_TRANSITORY
             ? L"Weasel reopen: recorded in transitory context\n"
@@ -595,6 +602,63 @@ bool WeaselTSF::_ValidateLastCommit(TfEditCookie ec,
                                     &comparison)) ||
       comparison != 0)
     return fail(L"Weasel reopen: validation caret is not at saved end\n");
+  return true;
+}
+
+bool WeaselTSF::_DetectTransientReset(TfEditCookie ec,
+                                      com_ptr<ITfContext> context) {
+  if (!_backspace_armed || !_backspace_transitory || _IsComposing() ||
+      context != _backspace_context || !_last_commit_range || !_last_commit_end)
+    return false;
+  com_ptr<ITfRange> begin, end;
+  BOOL savedEmpty = FALSE, anchorEmpty = FALSE;
+  LONG atBegin = 1, atEnd = 1;
+  if (FAILED(_last_commit_range->IsEmpty(ec, &savedEmpty)) || !savedEmpty ||
+      FAILED(_last_commit_end->IsEmpty(ec, &anchorEmpty)) || !anchorEmpty ||
+      FAILED(context->GetStart(ec, &begin)) ||
+      FAILED(context->GetEnd(ec, &end)) ||
+      FAILED(_last_commit_end->CompareStart(ec, begin, TF_ANCHOR_START,
+                                            &atBegin)) ||
+      FAILED(_last_commit_end->CompareStart(ec, end, TF_ANCHOR_END, &atEnd)) ||
+      atBegin != 0 || atEnd != 0)
+    return false;
+  _backspace_range_lost = true;
+  _last_commit_range = nullptr;
+  _last_commit_end = nullptr;
+  _last_commit_context = nullptr;
+  _last_commit_text.clear();
+  OutputDebugStringW(
+      L"Weasel reopen: temporary context reset, backspace eligible\n");
+  return true;
+}
+
+bool WeaselTSF::_RequestBackspace(TfEditCookie ec,
+                                  com_ptr<ITfContext> context,
+                                  const std::wstring& text) {
+  if (!_backspace_armed || !_backspace_h_trigger ||
+      context != _backspace_context || GetFocus() != _backspace_focus ||
+      text.empty() || text != _backspace_text || text.size() > 128 ||
+      _undo_input_active || _undo_marker_release)
+    return false;
+  // A forced override is still subject to exact range validation when the
+  // host exposes the range. Only a confirmed empty transitory reset bypasses
+  // it.
+  if (!_backspace_range_lost && !_ValidateLastCommit(ec, context))
+    return false;
+  for (wchar_t ch : text) {
+    const bool ordinary =
+        (ch >= 0x20 && ch <= 0x7e) || (ch >= 0x3400 && ch <= 0x4dbf) ||
+        (ch >= 0x4e00 && ch <= 0x9fff) || (ch >= 0xf900 && ch <= 0xfaff) ||
+        (ch >= 0x3000 && ch <= 0x3029) || (ch >= 0xff01 && ch <= 0xff60);
+    if (!ordinary) {
+      OutputDebugStringW(L"Weasel reopen: backspace refuses complex text\n");
+      return false;
+    }
+  }
+  const unsigned count = static_cast<unsigned>(text.size());
+  _ForgetLastCommit();
+  OutputDebugStringW(L"Weasel reopen: using backspace compatibility\n");
+  _RequestInputAction(context, count);
   return true;
 }
 

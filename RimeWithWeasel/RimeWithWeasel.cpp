@@ -202,6 +202,8 @@ bool _UpdateUIStyleColor(RimeConfig* config,
                          UIStyle& style,
                          const std::string& color = std::string());
 void _LoadAppOptions(RimeConfig* config, AppOptionsByAppName& app_options);
+static void _LoadReeditMethods(RimeConfig* config,
+                               ReeditMethodsByAppName& methods);
 
 void _RefreshTrayIcon(const RimeSessionId session_id,
                       const std::function<void()> _UpdateUICallback) {
@@ -290,6 +292,7 @@ void RimeWithWeaselHandler::Initialize() {
                                   &m_show_notifications_time))
       m_show_notifications_time = 1200;
     _LoadAppOptions(&config, m_app_options);
+    _LoadReeditMethods(&config, m_reedit_methods);
     rime_api->config_close(&config);
   }
   m_last_schema_id.clear();
@@ -653,6 +656,12 @@ void RimeWithWeaselHandler::_ReadClientInfo(WeaselSessionId ipc_id,
       }
     }
   }
+  auto method = m_reedit_methods.find(app_name);
+  if (method == m_reedit_methods.end())
+    method = m_reedit_methods.find("");
+  rime_api->set_property(
+      session_id, "h_reedit_method",
+      method == m_reedit_methods.end() ? "auto" : method->second.c_str());
   // inline preedit
   bool inline_preedit = session_status.style.inline_preedit;
   rime_api->set_option(session_id, "inline_preedit", Bool(inline_preedit));
@@ -2072,6 +2081,26 @@ static bool _UpdateUIStyleColor(RimeConfig* config,
   }
   return false;
 }
+static void _LoadReeditMethods(RimeConfig* config,
+                               ReeditMethodsByAppName& methods) {
+  methods.clear();
+  methods[""] = "auto";
+  auto read = [&](const std::string& app, const std::string& path) {
+    char value[32] = {};
+    if (!rime_api->config_get_string(config, path.c_str(), value,
+                                     sizeof(value)))
+      return;
+    const std::string method(value);
+    if (method == "auto" || method == "range" || method == "backspace" ||
+        method == "off")
+      methods[app] = method;
+  };
+  read("", "h_reedit_method");
+  ForEachRimeMap(config, "app_options", [&](const char* app, const char* path) {
+    read(app, std::string(path) + "/h_reedit_method");
+  });
+}
+
 static void _LoadAppOptions(RimeConfig* config,
                             AppOptionsByAppName& app_options) {
   app_options.clear();
@@ -2080,6 +2109,8 @@ static void _LoadAppOptions(RimeConfig* config,
         AppOptions& options(app_options[app_key]);
         ForEachRimeMap(
             config, app_path, [&](const char* opt_key, const char* opt_path) {
+              if (std::string(opt_key) == "h_reedit_method")
+                return;
               Bool value = False;
               if (rime_api->config_get_bool(config, opt_path, &value)) {
                 options[opt_key] = !!value;

@@ -152,6 +152,16 @@ class WeaselTSF : public ITfTextInputProcessorEx,
 
   /* Reopen the last committed range; configuration owns restored input. */
   void _ForgetLastCommit();
+  bool _DetectTransientReset(TfEditCookie ec, com_ptr<ITfContext> context);
+  bool _RequestBackspace(TfEditCookie ec,
+                         com_ptr<ITfContext> context,
+                         const std::wstring& text);
+  void _ArmBackspace(com_ptr<ITfContext> context,
+                     const std::wstring& text,
+                     bool transitory);
+  void _InvalidateBackspace();
+  void _RemoveReeditMouseGuard();
+  void _TrackReeditKey(WPARAM key, bool keyUp);
   void _RememberLastCommit(TfEditCookie ec,
                            com_ptr<ITfContext> context,
                            com_ptr<ITfRange> range,
@@ -173,6 +183,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
 
   /* Undo simulation */
   void _RequestUndo(com_ptr<ITfContext> pContext);
+  void _RequestInputAction(com_ptr<ITfContext> context, unsigned backspaces);
   void _SimulateUndo(ULONG_PTR inputTag);
   void _CancelUndo();
 
@@ -287,6 +298,16 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   com_ptr<ITfRange> _reopen_range;
   std::wstring _reopen_text;
   std::wstring _last_commit_text;
+  com_ptr<ITfContext> _backspace_context;
+  std::wstring _backspace_text;
+  HWND _backspace_focus = nullptr;
+  HHOOK _reedit_mouse_hook = nullptr;
+  bool _backspace_armed = false;
+  bool _backspace_transitory = false;
+  bool _backspace_range_lost = false;
+  bool _backspace_h_trigger = false;
+  unsigned _undo_backspaces = 0;
+  bool _undo_is_backspace = false;
   bool _undo_input_active = false;
   bool _undo_marker_release = false;
   ULONG_PTR _undo_input_tag = 0;

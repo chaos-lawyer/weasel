@@ -23,6 +23,8 @@ struct CaseInsensitiveCompare {
 typedef std::map<std::string, bool> AppOptions;
 typedef std::map<std::string, AppOptions, CaseInsensitiveCompare>
     AppOptionsByAppName;
+typedef std::map<std::string, std::string, CaseInsensitiveCompare>
+    ReeditMethodsByAppName;
 
 struct SessionStatus {
   SessionStatus()
@@ -116,6 +118,7 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   }
 
   AppOptionsByAppName m_app_options;
+  ReeditMethodsByAppName m_reedit_methods;
   weasel::UI* m_ui;  // reference
   DWORD m_active_session;
   bool m_disabled;

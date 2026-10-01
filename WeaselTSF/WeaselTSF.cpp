@@ -39,6 +39,7 @@ WeaselTSF::WeaselTSF() {
 
 WeaselTSF::~WeaselTSF() {
   _StopCloudPolling();
+  _RemoveReeditMouseGuard();
   DllRelease();
 }
 
