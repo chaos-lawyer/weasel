@@ -18,14 +18,12 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
   bool compositionEnded = false;
   if (ok) {
     compositionEnded = false;
-    if (!context->undo_action.empty()) {
-      if (context->undo_action == L"ctrl_z") {
-        if (_IsComposing()) {
-          _EndComposition(_pEditSessionContext, true);
-          compositionEnded = true;
-        }
-        _SimulateUndo();
-      }
+    if (context->undo_action == L"ctrl_z") {
+      // The configuration resumes through F35 after the tagged undo input.
+      // Never start a replacement composition in the undo request session.
+      _RequestUndo(_pEditSessionContext);
+      _UpdateUI(*context, _status);
+      return TRUE;
     }
     if (!commit.empty()) {
       // For auto-selecting, commit and preedit can both exist.

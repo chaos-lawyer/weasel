@@ -78,8 +78,11 @@ class CEndCompositionEditSession : public CEditSession {
   CEndCompositionEditSession(com_ptr<WeaselTSF> pTextService,
                              com_ptr<ITfContext> pContext,
                              com_ptr<ITfComposition> pComposition,
-                             BOOL clear = TRUE)
-      : CEditSession(pTextService, pContext), _clear(clear) {
+                             BOOL clear = TRUE,
+                             ULONG_PTR undoInputTag = 0)
+      : CEditSession(pTextService, pContext),
+        _clear(clear),
+        _undoInputTag(undoInputTag) {
     _pComposition = pComposition;
   }
 
@@ -89,6 +92,7 @@ class CEndCompositionEditSession : public CEditSession {
  private:
   com_ptr<ITfComposition> _pComposition;
   BOOL _clear;
+  ULONG_PTR _undoInputTag;
 };
 
 STDMETHODIMP CEndCompositionEditSession::DoEditSession(TfEditCookie ec) {
@@ -112,13 +116,17 @@ STDMETHODIMP CEndCompositionEditSession::DoEditSession(TfEditCookie ec) {
   // auto-commit.
   if (_pTextService && _pTextService->_IsCurrentComposition(_pComposition))
     _pTextService->_FinalizeComposition();
-  _pComposition->EndComposition(ec);
+  HRESULT hr = _pComposition->EndComposition(ec);
+  // Send undo only after the old composition's edit session has ended it.
+  if (SUCCEEDED(hr) && _undoInputTag)
+    _pTextService->_SimulateUndo(_undoInputTag);
   return S_OK;
 }
 
 void WeaselTSF::_EndComposition(com_ptr<ITfContext> pContext,
                                 BOOL clear,
-                                BOOL endUI) {
+                                BOOL endUI,
+                                ULONG_PTR undoInputTag) {
   CEndCompositionEditSession* pEditSession;
   HRESULT hr;
   com_ptr<ITfComposition> pComposition = _pComposition;
@@ -132,8 +140,9 @@ void WeaselTSF::_EndComposition(com_ptr<ITfContext> pContext,
 
   if (endUI)
     _cand->EndUI();
-  if (pContext && (pEditSession = new CEndCompositionEditSession(
-                       this, pContext, pComposition, clear)) != NULL) {
+  if (pContext &&
+      (pEditSession = new CEndCompositionEditSession(
+           this, pContext, pComposition, clear, undoInputTag)) != NULL) {
     pContext->RequestEditSession(_tfClientId, pEditSession,
                                  TF_ES_ASYNCDONTCARE | TF_ES_READWRITE, &hr);
     pEditSession->Release();
@@ -438,6 +447,7 @@ STDMETHODIMP WeaselTSF::OnCompositionTerminated(TfEditCookie ecWrite,
 }
 
 void WeaselTSF::_AbortComposition(bool clear) {
+  _CancelUndo();
   m_client.ClearComposition();
   _status.composing = false;
   if (_IsComposing()) {

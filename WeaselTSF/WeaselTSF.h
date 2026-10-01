@@ -114,7 +114,8 @@ class WeaselTSF : public ITfTextInputProcessorEx,
                          BOOL fCUASWorkaroundEnabled);
   void _EndComposition(com_ptr<ITfContext> pContext,
                        BOOL clear,
-                       BOOL endUI = TRUE);
+                       BOOL endUI = TRUE,
+                       ULONG_PTR undoInputTag = 0);
   BOOL _ShowInlinePreedit(com_ptr<ITfContext> pContext,
                           const std::shared_ptr<weasel::Context> context);
   void _UpdateComposition(com_ptr<ITfContext> pContext);
@@ -142,7 +143,9 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   com_ptr<ITfContext> _GetUIContextDocument();
 
   /* Undo simulation */
-  void _SimulateUndo();
+  void _RequestUndo(com_ptr<ITfContext> pContext);
+  void _SimulateUndo(ULONG_PTR inputTag);
+  void _CancelUndo();
 
   /* Display Attribute */
   void _ClearCompositionDisplayAttributes(TfEditCookie ec,
@@ -175,7 +178,11 @@ class WeaselTSF : public ITfTextInputProcessorEx,
 
   BOOL _InitKeyEventSink();
   void _UninitKeyEventSink();
-  void _ProcessKeyEvent(WPARAM wParam, LPARAM lParam, BOOL* pfEaten);
+  // Tagged input without a new server response must not replay cached data.
+  bool _ProcessKeyEvent(ITfContext* pContext,
+                        WPARAM wParam,
+                        LPARAM lParam,
+                        BOOL* pfEaten);
 
   BOOL _InitPreservedKey();
   void _UninitPreservedKey();
@@ -239,5 +246,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   BOOL _async_edit = false;
   BOOL _committed = false;
   BOOL _isToOpenClose = false;
-  int _simulated_keys_to_skip = 0;
+  ULONG_PTR _undo_input_tag = 0;
+  HWND _undo_focus = nullptr;
+  com_ptr<ITfContext> _undo_context;
 };

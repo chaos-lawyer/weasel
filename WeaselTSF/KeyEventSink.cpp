@@ -8,18 +8,48 @@ static weasel::KeyEvent prevKeyEvent;
 static BOOL prevfEaten = FALSE;
 static int keyCountToSimulate = 0;
 
-void WeaselTSF::_ProcessKeyEvent(WPARAM wParam, LPARAM lParam, BOOL* pfEaten) {
+namespace {
+constexpr ULONG_PTR kUndoInputMarker = 0x57530000;
+constexpr ULONG_PTR kUndoInputMarkerMask = 0xffff0000;
+thread_local unsigned int undoInputSerial = 0;
+}  // namespace
+
+bool WeaselTSF::_ProcessKeyEvent(ITfContext* pContext,
+                                 WPARAM wParam,
+                                 LPARAM lParam,
+                                 BOOL* pfEaten) {
+  const ULONG_PTR inputTag = static_cast<ULONG_PTR>(GetMessageExtraInfo());
+  const bool keyUp = KeyInfo(lParam).isKeyUp;
+  if ((inputTag & kUndoInputMarkerMask) == kUndoInputMarker &&
+      (wParam == VK_CONTROL || wParam == 'Z' || wParam == VK_F24)) {
+    // Bypass Rime for the entire Ctrl+Z sequence, including both key-ups.
+    // The tagged F24 marker is private and must never reach the host app.
+    *pfEaten = (wParam == VK_F24);
+    if (wParam == VK_F24 && !keyUp && inputTag == _undo_input_tag) {
+      const bool resume =
+          _undo_context == pContext && _undo_focus == GetFocus();
+      _CancelUndo();
+      if (resume && _IsKeyboardOpen() && !_IsKeyboardDisabled()) {
+        // F35 is a configuration notification, not a Windows keystroke.
+        m_client.ProcessKeyEvent(weasel::KeyEvent(ibus::F35, 0));
+        return true;
+      }
+    }
+    return false;
+  }
+  if (!keyUp)
+    _CancelUndo();
   // when _IsKeyboardDisabled don't eat the key,
   // when keyboard closable and keyboard closed, don't eat the key
   if ((_isToOpenClose && !_IsKeyboardOpen()) || _IsKeyboardDisabled()) {
     *pfEaten = FALSE;
-    return;
+    return true;
   }
 
   // if server connection is Not OK, don't eat it.
   if (!_EnsureServerConnected()) {
     *pfEaten = FALSE;
-    return;
+    return true;
   }
   weasel::KeyEvent ke;
   GetKeyboardState(_lpbKeyState);
@@ -34,12 +64,6 @@ void WeaselTSF::_ProcessKeyEvent(WPARAM wParam, LPARAM lParam, BOOL* pfEaten) {
       else if (ke.keycode == ibus::Down)
         ke.keycode = ibus::Up;
     }
-    if (!(ke.mask & ibus::RELEASE_MASK) && _simulated_keys_to_skip > 0) {
-      --_simulated_keys_to_skip;
-      *pfEaten = FALSE;
-      return;
-    }
-
     if (!keyCountToSimulate)
       *pfEaten = (BOOL)m_client.ProcessKeyEvent(ke);
 
@@ -66,6 +90,7 @@ void WeaselTSF::_ProcessKeyEvent(WPARAM wParam, LPARAM lParam, BOOL* pfEaten) {
     prevfEaten = *pfEaten;
     prevKeyEvent = ke;
   }
+  return true;
 }
 
 STDMETHODIMP WeaselTSF::OnSetFocus(BOOL fForeground) {
@@ -98,8 +123,8 @@ STDMETHODIMP WeaselTSF::OnTestKeyDown(ITfContext* pContext,
     *pfEaten = TRUE;
     return S_OK;
   }
-  _ProcessKeyEvent(wParam, lParam, pfEaten);
-  _UpdateComposition(pContext);
+  if (_ProcessKeyEvent(pContext, wParam, lParam, pfEaten))
+    _UpdateComposition(pContext);
   if (*pfEaten)
     _fTestKeyDownPending = TRUE;
   return S_OK;
@@ -114,8 +139,8 @@ STDMETHODIMP WeaselTSF::OnKeyDown(ITfContext* pContext,
     _fTestKeyDownPending = FALSE;
     *pfEaten = TRUE;
   } else {
-    _ProcessKeyEvent(wParam, lParam, pfEaten);
-    _UpdateComposition(pContext);
+    if (_ProcessKeyEvent(pContext, wParam, lParam, pfEaten))
+      _UpdateComposition(pContext);
   }
   return S_OK;
 }
@@ -129,8 +154,8 @@ STDMETHODIMP WeaselTSF::OnTestKeyUp(ITfContext* pContext,
     *pfEaten = TRUE;
     return S_OK;
   }
-  _ProcessKeyEvent(wParam, lParam, pfEaten);
-  _UpdateComposition(pContext);
+  if (_ProcessKeyEvent(pContext, wParam, lParam, pfEaten))
+    _UpdateComposition(pContext);
   if (*pfEaten)
     _fTestKeyUpPending = TRUE;
   return S_OK;
@@ -145,8 +170,7 @@ STDMETHODIMP WeaselTSF::OnKeyUp(ITfContext* pContext,
     _fTestKeyUpPending = FALSE;
     *pfEaten = TRUE;
   } else {
-    _ProcessKeyEvent(wParam, lParam, pfEaten);
-    if (!_async_edit)
+    if (_ProcessKeyEvent(pContext, wParam, lParam, pfEaten) && !_async_edit)
       _UpdateComposition(pContext);
   }
   return S_OK;
@@ -173,6 +197,7 @@ BOOL WeaselTSF::_InitKeyEventSink() {
 }
 
 void WeaselTSF::_UninitKeyEventSink() {
+  _CancelUndo();
   com_ptr<ITfKeystrokeMgr> pKeystrokeMgr;
 
   if (_pThreadMgr->QueryInterface(&pKeystrokeMgr) != S_OK)
@@ -206,18 +231,56 @@ BOOL WeaselTSF::_InitPreservedKey() {
 
 void WeaselTSF::_UninitPreservedKey() {}
 
-void WeaselTSF::_SimulateUndo() {
-  _simulated_keys_to_skip = 2;
-  INPUT inputs[4] = {};
-  inputs[0].type = INPUT_KEYBOARD;
+void WeaselTSF::_CancelUndo() {
+  _undo_input_tag = 0;
+  _undo_context = nullptr;
+  _undo_focus = nullptr;
+}
+
+void WeaselTSF::_RequestUndo(com_ptr<ITfContext> pContext) {
+  _undo_input_tag = kUndoInputMarker | (++undoInputSerial & 0xffff);
+  _undo_context = pContext;
+  _undo_focus = GetFocus();
+  if (_IsComposing())
+    _EndComposition(pContext, true, true, _undo_input_tag);
+  else
+    _SimulateUndo(_undo_input_tag);
+}
+
+void WeaselTSF::_SimulateUndo(ULONG_PTR inputTag) {
+  if (!inputTag || inputTag != _undo_input_tag)
+    return;
+
+  com_ptr<ITfDocumentMgr> document;
+  com_ptr<ITfContext> context;
+  if (!_pThreadMgr || FAILED(_pThreadMgr->GetFocus(&document)) || !document ||
+      FAILED(document->GetTop(&context)) || context != _undo_context ||
+      GetFocus() != _undo_focus || _IsComposing()) {
+    _CancelUndo();
+    return;
+  }
+
+  INPUT inputs[6] = {};
+  for (auto& input : inputs) {
+    input.type = INPUT_KEYBOARD;
+    input.ki.dwExtraInfo = inputTag;
+  }
   inputs[0].ki.wVk = VK_CONTROL;
-  inputs[1].type = INPUT_KEYBOARD;
   inputs[1].ki.wVk = 'Z';
-  inputs[2].type = INPUT_KEYBOARD;
   inputs[2].ki.wVk = 'Z';
   inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
-  inputs[3].type = INPUT_KEYBOARD;
   inputs[3].ki.wVk = VK_CONTROL;
   inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
-  ::SendInput(sizeof(inputs) / sizeof(INPUT), inputs, sizeof(INPUT));
+  // Windows queues these after Ctrl+Z. The marker triggers a Lua notification
+  // only after the host has received the preceding undo keystrokes.
+  inputs[4].ki.wVk = VK_F24;
+  inputs[5].ki.wVk = VK_F24;
+  inputs[5].ki.dwFlags = KEYEVENTF_KEYUP;
+  const UINT sent = ::SendInput(6, inputs, sizeof(INPUT));
+  if (sent != 6) {
+    _CancelUndo();
+    // A partially injected shortcut must not leave Ctrl or Z held down.
+    if (sent > 0 && sent < 4)
+      ::SendInput(2, inputs + 2, sizeof(INPUT));
+  }
 }
