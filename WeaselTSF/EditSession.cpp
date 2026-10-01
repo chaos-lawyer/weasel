@@ -27,8 +27,12 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
                             context->undo_action.substr(reopenPrefix.size()))) {
         // Resume configuration and consume its response under the same lock.
         // This avoids another queued key response overwriting the callback.
-        if (m_client.ProcessKeyEvent(weasel::KeyEvent(ibus::F35, 0)))
-          return DoEditSession(ec);
+        if (m_client.ProcessKeyEvent(weasel::KeyEvent(ibus::F35, 0))) {
+          const HRESULT result = DoEditSession(ec);
+          _FinishReopen();
+          return result;
+        }
+        _RollbackReopen(ec, _pEditSessionContext);
         _EndComposition(_pEditSessionContext, false);
       } else {
         // An asynchronous commit may still be waiting for its end session.
@@ -83,13 +87,21 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
       _StartComposition(_pEditSessionContext,
                         _fCUASWorkaroundEnabled && !config.inline_preedit);
     } else if (!_status.composing && _IsComposing()) {
-      _EndComposition(_pEditSessionContext, true);
+      const bool reopening = !_reopen_text.empty();
+      if (reopening)
+        _RollbackReopen(ec, _pEditSessionContext);
+      _EndComposition(_pEditSessionContext, !reopening);
     }
     if (_IsComposing() && config.inline_preedit) {
       _ShowInlinePreedit(_pEditSessionContext, context);
     }
   }
 
+  if (!ok && !_reopen_text.empty()) {
+    _RollbackReopen(ec, _pEditSessionContext);
+    _EndComposition(_pEditSessionContext, false);
+    OutputDebugStringW(L"Weasel reopen: callback response unavailable\n");
+  }
   if (ok && !compositionEnded)
     _UpdateCompositionWindow(_pEditSessionContext);
   // Keep the existing candidate window alive during top-word input, but

@@ -161,6 +161,9 @@ class WeaselTSF : public ITfTextInputProcessorEx,
                          com_ptr<ITfContext> context,
                          const std::wstring& expectedText);
 
+  void _RollbackReopen(TfEditCookie ec, com_ptr<ITfContext> context);
+  void _FinishReopen();
+
   /* Undo simulation */
   void _RequestUndo(com_ptr<ITfContext> pContext);
   void _SimulateUndo(ULONG_PTR inputTag);
@@ -273,8 +276,10 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   com_ptr<ITfContext> _cloud_context;
   com_ptr<ITfContext> _last_commit_context;
   com_ptr<ITfRange> _last_commit_range;
+  com_ptr<ITfRange> _last_commit_end;
+  com_ptr<ITfRange> _reopen_range;
+  std::wstring _reopen_text;
   std::wstring _last_commit_text;
-  HWND _last_commit_focus = nullptr;
   bool _undo_input_active = false;
   bool _undo_marker_release = false;
   ULONG_PTR _undo_input_tag = 0;

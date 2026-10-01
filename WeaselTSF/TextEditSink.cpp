@@ -22,8 +22,10 @@ STDMETHODIMP WeaselTSF::OnEndEdit(ITfContext* pContext,
                                   ITfEditRecord* pEditRecord) {
   // Invalidate as soon as the caret leaves our commit/adjacent composition,
   // or the document no longer contains exactly the text we recorded.
-  if (_last_commit_range && !_ValidateLastCommit(ecReadOnly, pContext))
+  if (_last_commit_range && !_ValidateLastCommit(ecReadOnly, pContext)) {
+    OutputDebugStringW(L"Weasel reopen: recorded range invalidated by edit\n");
     _ForgetLastCommit();
+  }
 
   BOOL fSelectionChanged;
   IEnumTfRanges* pEnumTextChanges;
