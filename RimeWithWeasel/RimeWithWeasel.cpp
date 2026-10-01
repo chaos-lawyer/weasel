@@ -9,13 +9,11 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
-#include <fstream>
 #include <map>
 #include <array>
 #include <vector>
 #include <regex>
 #include <rime_api.h>
-#include "LlmClient.h"
 
 #define TRANSPARENT_COLOR 0x00000000
 #define ARGB2ABGR(value)                                 \
@@ -84,152 +82,6 @@ static int _MapDisplayPreeditPosition(int position,
   }
   return position - static_cast<int>(preedit.internal_prefix_length) +
          static_cast<int>(preedit.display_prefix_length);
-}
-
-static std::string _TrimConfigValue(std::string value) {
-  const auto first = value.find_first_not_of(" \t\r\n");
-  if (first == std::string::npos)
-    return {};
-  const auto last = value.find_last_not_of(" \t\r\n");
-  return value.substr(first, last - first + 1);
-}
-
-static std::filesystem::path _ResolveLlmConfigPath(
-    const std::wstring& custom_config_path) {
-  if (custom_config_path.empty()) {
-    return WeaselUserDataPath() / L"dicts" / L"llm_config.txt";
-  }
-  std::filesystem::path p(custom_config_path);
-  if (p.is_absolute()) {
-    return p;
-  }
-  return WeaselUserDataPath() / p;
-}
-
-static std::map<std::string, std::string> _ReadLlmTextConfig(
-    const std::wstring& custom_config_path = L"") {
-  std::map<std::string, std::string> values;
-  const auto config_path = _ResolveLlmConfigPath(custom_config_path);
-  std::ifstream file(config_path, std::ios::binary);
-  std::string line;
-  while (std::getline(file, line)) {
-    if (values.empty() && line.size() >= 3 &&
-        static_cast<unsigned char>(line[0]) == 0xef &&
-        static_cast<unsigned char>(line[1]) == 0xbb &&
-        static_cast<unsigned char>(line[2]) == 0xbf)
-      line.erase(0, 3);
-    line = _TrimConfigValue(line);
-    if (line.empty() || line[0] == '#' || line[0] == ';')
-      continue;
-    const auto separator = line.find('=');
-    if (separator == std::string::npos)
-      continue;
-    auto key = _TrimConfigValue(line.substr(0, separator));
-    auto value = _TrimConfigValue(line.substr(separator + 1));
-    if (!key.empty())
-      values[key] = value;
-  }
-  return values;
-}
-
-static std::string _LlmValue(const std::map<std::string, std::string>& values,
-                             const char* key,
-                             const std::string& default_val = "") {
-  auto it = values.find(key);
-  return it == values.end() ? default_val : it->second;
-}
-
-static std::string _DecodePromptEscapes(const std::string& value) {
-  std::string result;
-  result.reserve(value.size());
-  for (size_t i = 0; i < value.size(); ++i) {
-    if (value[i] != '\\' || i + 1 >= value.size()) {
-      result.push_back(value[i]);
-      continue;
-    }
-    const char next = value[++i];
-    switch (next) {
-      case 'n':
-        result.push_back('\n');
-        break;
-      case 'r':
-        result.push_back('\r');
-        break;
-      case 't':
-        result.push_back('\t');
-        break;
-      case '\\':
-        result.push_back('\\');
-        break;
-      default:
-        result.push_back('\\');
-        result.push_back(next);
-        break;
-    }
-  }
-  return result;
-}
-
-static bool _LlmBool(const std::map<std::string, std::string>& values,
-                     const char* key,
-                     bool default_val = false) {
-  auto it = values.find(key);
-  if (it == values.end())
-    return default_val;
-  std::string value = it->second;
-  std::transform(value.begin(), value.end(), value.begin(),
-                 [](unsigned char c) { return static_cast<char>(tolower(c)); });
-  if (value == "1" || value == "true" || value == "yes" || value == "on")
-    return true;
-  if (value == "0" || value == "false" || value == "no" || value == "off")
-    return false;
-  return default_val;
-}
-
-static int _LlmInt(const std::map<std::string, std::string>& values,
-                   const char* key,
-                   int default_val = -1) {
-  auto it = values.find(key);
-  if (it == values.end())
-    return default_val;
-  try {
-    size_t consumed = 0;
-    int value = std::stoi(it->second, &consumed);
-    return consumed == it->second.size() ? value : default_val;
-  } catch (...) {
-    return default_val;
-  }
-}
-
-static double _LlmDouble(const std::map<std::string, std::string>& values,
-                         const char* key,
-                         double default_val = 0.0) {
-  auto it = values.find(key);
-  if (it == values.end())
-    return default_val;
-  try {
-    size_t consumed = 0;
-    double value = std::stod(it->second, &consumed);
-    return consumed == it->second.size() ? value : default_val;
-  } catch (...) {
-    return default_val;
-  }
-}
-
-static bool _HasLlmTextConfig(
-    const std::map<std::string, std::string>& values) {
-  if (!_LlmBool(values, "enabled", true))
-    return false;
-  if (_LlmValue(values, "base_url").empty() ||
-      _LlmValue(values, "api_key").empty() ||
-      _LlmValue(values, "model").empty()) {
-    return false;
-  }
-  if (_LlmValue(values, "prompt_both").empty() ||
-      _LlmValue(values, "prompt_initials_only").empty()) {
-    return false;
-  }
-  return true;
 }
 
 WeaselSessionId _GenerateNewWeaselSessionId(SessionStatusMap sm, DWORD pid) {
@@ -446,11 +298,6 @@ void RimeWithWeaselHandler::Initialize() {
 void RimeWithWeaselHandler::Finalize() {
   m_active_session = 0;
   m_disabled = true;
-  for (auto& worker : m_llm_workers) {
-    if (worker.thread.joinable())
-      worker.thread.join();
-  }
-  m_llm_workers.clear();
   m_session_status_map.clear();
   LOG(INFO) << "Finalizing la rime.";
   rime_api->finalize();
@@ -575,62 +422,7 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
     return FALSE;
   RimeSessionId session_id = to_session_id(ipc_id);
   SessionStatus& session_status = get_session_status(ipc_id);
-  if (!(keyEvent.mask & ibus::Modifier::RELEASE_MASK) &&
-      ((keyEvent.mask & (ibus::CONTROL_MASK | ibus::ALT_MASK)) ||
-       keyEvent.keycode == ibus::BackSpace ||
-       keyEvent.keycode == ibus::Delete || keyEvent.keycode == ibus::Left ||
-       keyEvent.keycode == ibus::Right || keyEvent.keycode == ibus::Up ||
-       keyEvent.keycode == ibus::Down || keyEvent.keycode == ibus::Home ||
-       keyEvent.keycode == ibus::End))
-    session_status.llm_recent_commits.clear();
   _RemapCandidateNavigationKey(session_status, session_id, keyEvent);
-
-  const bool has_llm_candidates = !session_status.llm_candidates.empty();
-  const bool is_key_down = !(keyEvent.mask & ibus::Modifier::RELEASE_MASK);
-
-  const bool repeated_llm_tab = keyEvent.keycode == ibus::Tab &&
-                                !session_status.llm_request_id.empty() &&
-                                !session_status.llm_raw_input.empty();
-  const bool is_page_nav =
-      has_llm_candidates &&
-      (keyEvent.keycode == ibus::Prior || keyEvent.keycode == ibus::Next ||
-       keyEvent.keycode == ibus::Page_Up ||
-       keyEvent.keycode == ibus::Page_Down);
-  const bool is_cand_nav =
-      has_llm_candidates &&
-      (keyEvent.keycode == ibus::Up || keyEvent.keycode == ibus::Down);
-  const bool numeric_llm_selection =
-      has_llm_candidates && !session_status.llm_loading &&
-      !session_status.llm_is_error && keyEvent.keycode >= '1' &&
-      keyEvent.keycode <= '9';
-  const bool space_llm_selection =
-      has_llm_candidates && session_status.llm_page_active &&
-      !session_status.llm_loading && !session_status.llm_is_error &&
-      (keyEvent.keycode == ibus::space || keyEvent.keycode == 32);
-  const bool selecting_llm_candidate =
-      (keyEvent.keycode == ibus::Select &&
-       !session_status.llm_commit_text.empty()) ||
-      numeric_llm_selection || space_llm_selection;
-
-  const bool keep_llm_session =
-      repeated_llm_tab || selecting_llm_candidate || is_page_nav || is_cand_nav;
-
-  if (is_key_down && !keep_llm_session) {
-    ++session_status.llm_generation;
-    session_status.llm_request_pending = false;
-    session_status.llm_request_id.clear();
-    session_status.llm_raw_input.clear();
-    session_status.llm_schema_id.clear();
-    session_status.llm_context.clear();
-    session_status.llm_context_diagnostic.clear();
-    session_status.llm_context_polls = 0;
-    session_status.llm_candidates.clear();
-    session_status.llm_loading = false;
-    session_status.llm_is_error = false;
-    session_status.llm_page_active = true;
-    session_status.llm_commit_text.clear();
-    session_status.llm_request_submitted = false;
-  }
 
   char runtime_select_keys_buf[256] = {0};
   const bool has_runtime_select_keys =
@@ -642,40 +434,10 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
   Bool handled = False;
   bool custom_key_processed = false;
 
-  if (has_llm_candidates && is_key_down && is_page_nav) {
-    const bool is_next =
-        keyEvent.keycode == ibus::Next || keyEvent.keycode == ibus::Page_Down;
-    const bool is_prev =
-        keyEvent.keycode == ibus::Prior || keyEvent.keycode == ibus::Page_Up;
-    if (is_next) {
-      if (session_status.llm_page_active) {
-        session_status.llm_page_active = false;
-        handled = True;
-        custom_key_processed = true;
-      }
-    } else if (is_prev) {
-      if (!session_status.llm_page_active) {
-        RIME_STRUCT(RimeContext, selection_context);
-        if (rime_api->get_context(session_id, &selection_context)) {
-          if (selection_context.menu.page_no == 0) {
-            session_status.llm_page_active = true;
-            handled = True;
-            custom_key_processed = true;
-          }
-          rime_api->free_context(&selection_context);
-        }
-      }
-    }
-  }
-
-  if (has_runtime_select_keys && !custom_key_processed) {
+  if (has_runtime_select_keys) {
     RIME_STRUCT(RimeContext, ctx);
     if (rime_api->get_context(session_id, &ctx)) {
-      const size_t num_candidates =
-          (!session_status.llm_candidates.empty() &&
-           session_status.llm_page_active)
-              ? session_status.llm_candidates.size()
-              : static_cast<size_t>(ctx.menu.num_candidates);
+      const size_t num_candidates = ctx.menu.num_candidates;
       rime_api->free_context(&ctx);
 
       if (num_candidates > 0) {
@@ -686,24 +448,8 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
             keyEvent.keycode, keyEvent.mask, runtime_keys, num_candidates,
             selected_index);
         if (action == weasel::DynamicCandidateSelectAction::SelectCandidate) {
-          if (!session_status.llm_candidates.empty() &&
-              session_status.llm_page_active) {
-            if (!session_status.llm_loading && !session_status.llm_is_error) {
-              if (selected_index < session_status.llm_candidates.size()) {
-                session_status.llm_commit_text =
-                    session_status.llm_candidates[selected_index].text;
-                rime_api->clear_composition(session_id);
-                handled = True;
-              }
-            }
-          } else {
-            handled = rime_api->select_candidate_on_current_page(
-                session_id, selected_index);
-            ++session_status.llm_generation;
-            session_status.llm_request_id.clear();
-            session_status.llm_candidates.clear();
-            session_status.llm_page_active = true;
-          }
+          handled = rime_api->select_candidate_on_current_page(session_id,
+                                                               selected_index);
           custom_key_processed = true;
         } else if (action == weasel::DynamicCandidateSelectAction::Swallow) {
           handled = True;
@@ -713,122 +459,9 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
     }
   }
 
-  if (!custom_key_processed && !session_status.llm_candidates.empty() &&
-      is_key_down) {
-    if (space_llm_selection) {
-      session_status.llm_commit_text = session_status.llm_candidates[0].text;
-      rime_api->clear_composition(session_id);
-      handled = True;
-      custom_key_processed = true;
-    } else if (keyEvent.keycode >= '1' && keyEvent.keycode <= '9') {
-      const size_t selected = static_cast<size_t>(keyEvent.keycode - '1');
-      if (session_status.llm_page_active) {
-        if (!session_status.llm_loading && !session_status.llm_is_error) {
-          if (selected < session_status.llm_candidates.size()) {
-            session_status.llm_commit_text =
-                session_status.llm_candidates[selected].text;
-            rime_api->clear_composition(session_id);
-            handled = True;
-            custom_key_processed = true;
-          }
-        }
-      } else {
-        RIME_STRUCT(RimeContext, selection_context);
-        if (rime_api->get_context(session_id, &selection_context)) {
-          if (selected <
-              static_cast<size_t>(selection_context.menu.num_candidates)) {
-            handled = rime_api->select_candidate_on_current_page(session_id,
-                                                                 selected);
-            custom_key_processed = true;
-            ++session_status.llm_generation;
-            session_status.llm_request_id.clear();
-            session_status.llm_candidates.clear();
-            session_status.llm_page_active = true;
-          }
-          rime_api->free_context(&selection_context);
-        }
-      }
-    }
-  }
-
-  if (!custom_key_processed)
+  if (!custom_key_processed) {
     handled = rime_api->process_key(session_id, keyEvent.keycode,
                                     expand_ibus_modifier(keyEvent.mask));
-
-  if (!(keyEvent.mask & ibus::Modifier::RELEASE_MASK)) {
-    char trigger[8] = {0};
-    char raw_input[256] = {0};
-    char config_path[1024] = {0};
-    if (rime_api->get_property(session_id, "llm_trigger", trigger,
-                               sizeof(trigger)) &&
-        trigger[0] == '1' &&
-        rime_api->get_property(session_id, "llm_raw_input", raw_input,
-                               sizeof(raw_input))) {
-      rime_api->set_property(session_id, "llm_trigger", "");
-      std::wstring custom_config_path;
-      if (rime_api->get_property(session_id, "llm_config_path", config_path,
-                                 sizeof(config_path)) &&
-          config_path[0] != '\0') {
-        custom_config_path = u8tow(config_path);
-      }
-      RIME_STRUCT(RimeStatus, status);
-      if (rime_api->get_status(session_id, &status) && status.schema_id) {
-        const auto text_config = _ReadLlmTextConfig(custom_config_path);
-        if (!_HasLlmTextConfig(text_config)) {
-          session_status.llm_loading = false;
-          session_status.llm_is_error = true;
-          session_status.llm_request_pending = false;
-          session_status.llm_request_submitted = false;
-          std::wstring err_msg = L"未找到 llm_config.txt 配置";
-          if (!text_config.empty()) {
-            if (!_LlmBool(text_config, "enabled", true)) {
-              err_msg = L"LLM 功能已禁用 (enabled: false)";
-            } else if (_LlmValue(text_config, "api_key").empty()) {
-              err_msg = L"配置缺少 api_key";
-            } else if (_LlmValue(text_config, "base_url").empty()) {
-              err_msg = L"配置缺少 base_url";
-            } else if (_LlmValue(text_config, "model").empty()) {
-              err_msg = L"配置缺少 model";
-            } else if (_LlmValue(text_config, "prompt_both").empty()) {
-              err_msg = L"配置缺少 prompt_both";
-            } else if (_LlmValue(text_config, "prompt_initials_only").empty()) {
-              err_msg = L"配置缺少 prompt_initials_only";
-            }
-          }
-          session_status.llm_candidates = {{err_msg, L"✦ 错误"}};
-        } else {
-          const bool same_request =
-              session_status.llm_raw_input == raw_input &&
-              session_status.llm_schema_id == status.schema_id &&
-              session_status.llm_config_path == custom_config_path &&
-              !session_status.llm_request_id.empty();
-          session_status.llm_config_path = custom_config_path;
-          session_status.llm_request_id =
-              std::to_wstring(ipc_id) + L"-" +
-              std::to_wstring(session_status.llm_generation);
-          session_status.llm_raw_input = raw_input;
-          session_status.llm_schema_id = status.schema_id;
-          session_status.llm_context_enabled =
-              _LlmBool(text_config, "context_enabled", true);
-          session_status.llm_context_chars =
-              std::clamp(_LlmInt(text_config, "context_chars", 500), 0, 2000);
-          session_status.llm_boundary_search_chars = std::clamp(
-              _LlmInt(text_config, "boundary_search_chars", 100), 0, 500);
-          session_status.llm_request_pending = true;
-          session_status.llm_loading = true;
-          session_status.llm_is_error = false;
-          session_status.llm_candidates = {{L"AI分析中...", L"✦ 请稍候"}};
-          session_status.llm_page_active = true;
-          if (!same_request)
-            session_status.llm_request_submitted = false;
-
-          if (!session_status.llm_context_enabled) {
-            _StartLlmWorker(session_status, ipc_id, L"");
-          }
-        }
-      }
-      rime_api->free_status(&status);
-    }
   }
   // vim_mode when keydown only
   if (!handled && !(keyEvent.mask & ibus::Modifier::RELEASE_MASK)) {
@@ -854,14 +487,6 @@ void RimeWithWeaselHandler::CommitComposition(WeaselSessionId ipc_id) {
   DLOG(INFO) << "Commit composition: ipc_id = " << ipc_id;
   if (m_disabled)
     return;
-  auto& llm_status = get_session_status(ipc_id);
-  ++llm_status.llm_generation;
-  llm_status.llm_request_id.clear();
-  llm_status.llm_candidates.clear();
-  llm_status.llm_loading = false;
-  llm_status.llm_is_error = false;
-  llm_status.llm_commit_text.clear();
-  llm_status.llm_request_submitted = false;
   rime_api->commit_composition(to_session_id(ipc_id));
   _UpdateUI(ipc_id);
   m_active_session = ipc_id;
@@ -871,14 +496,6 @@ void RimeWithWeaselHandler::ClearComposition(WeaselSessionId ipc_id) {
   DLOG(INFO) << "Clear composition: ipc_id = " << ipc_id;
   if (m_disabled)
     return;
-  auto& llm_status = get_session_status(ipc_id);
-  ++llm_status.llm_generation;
-  llm_status.llm_request_id.clear();
-  llm_status.llm_candidates.clear();
-  llm_status.llm_loading = false;
-  llm_status.llm_is_error = false;
-  llm_status.llm_commit_text.clear();
-  llm_status.llm_request_submitted = false;
   rime_api->clear_composition(to_session_id(ipc_id));
   _UpdateUI(ipc_id);
   m_active_session = ipc_id;
@@ -891,24 +508,7 @@ void RimeWithWeaselHandler::SelectCandidateOnCurrentPage(
              << ", index = " << index;
   if (m_disabled)
     return;
-  SessionStatus& session_status = get_session_status(ipc_id);
-  if (!session_status.llm_candidates.empty() &&
-      session_status.llm_page_active) {
-    if (!session_status.llm_loading && !session_status.llm_is_error) {
-      if (index < session_status.llm_candidates.size()) {
-        session_status.llm_commit_text =
-            session_status.llm_candidates[index].text;
-        rime_api->clear_composition(to_session_id(ipc_id));
-        return;
-      }
-    }
-    return;
-  }
   rime_api->select_candidate_on_current_page(to_session_id(ipc_id), index);
-  ++session_status.llm_generation;
-  session_status.llm_request_id.clear();
-  session_status.llm_candidates.clear();
-  session_status.llm_page_active = true;
 }
 
 bool RimeWithWeaselHandler::HighlightCandidateOnCurrentPage(
@@ -929,33 +529,7 @@ bool RimeWithWeaselHandler::ChangePage(bool backward,
                                        EatLine eat) {
   DLOG(INFO) << "change page, ipc_id = " << ipc_id
              << (backward ? "backward" : "foreward");
-  SessionStatus& session_status = get_session_status(ipc_id);
-  bool res = false;
-  if (!session_status.llm_candidates.empty()) {
-    if (!backward) {
-      if (session_status.llm_page_active) {
-        session_status.llm_page_active = false;
-        res = true;
-      } else {
-        res = rime_api->change_page(to_session_id(ipc_id), false);
-      }
-    } else {
-      if (!session_status.llm_page_active) {
-        RIME_STRUCT(RimeContext, ctx);
-        if (rime_api->get_context(session_status.session_id, &ctx)) {
-          if (ctx.menu.page_no == 0) {
-            session_status.llm_page_active = true;
-            res = true;
-          } else {
-            res = rime_api->change_page(to_session_id(ipc_id), true);
-          }
-          rime_api->free_context(&ctx);
-        }
-      }
-    }
-  } else {
-    res = rime_api->change_page(to_session_id(ipc_id), backward);
-  }
+  bool res = rime_api->change_page(to_session_id(ipc_id), backward);
   _Respond(ipc_id, eat);
   _UpdateUI(ipc_id);
   return res;
@@ -971,256 +545,10 @@ void RimeWithWeaselHandler::FocusIn(DWORD client_caps, WeaselSessionId ipc_id) {
 }
 
 void RimeWithWeaselHandler::FocusOut(DWORD param, WeaselSessionId ipc_id) {
-  get_session_status(ipc_id).llm_recent_commits.clear();
   DLOG(INFO) << "Focus out: ipc_id = " << ipc_id;
-  auto it = m_session_status_map.find(ipc_id);
-  if (it != m_session_status_map.end()) {
-    ++it->second.llm_generation;
-    it->second.llm_request_id.clear();
-    it->second.llm_candidates.clear();
-    it->second.llm_commit_text.clear();
-    it->second.llm_request_pending = false;
-    it->second.llm_request_submitted = false;
-  }
   if (m_ui)
     m_ui->Hide();
   m_active_session = 0;
-}
-
-void RimeWithWeaselHandler::_StartLlmWorker(SessionStatus& session_status,
-                                            WeaselSessionId ipc_id,
-                                            const std::wstring& context) {
-  if (session_status.llm_request_submitted ||
-      session_status.llm_raw_input.empty()) {
-    return;
-  }
-  const auto text_config = _ReadLlmTextConfig(session_status.llm_config_path);
-  if (!_HasLlmTextConfig(text_config) ||
-      !_LlmBool(text_config, "enabled", true)) {
-    session_status.llm_loading = false;
-    session_status.llm_is_error = true;
-    session_status.llm_request_pending = false;
-    session_status.llm_request_submitted = true;
-    session_status.llm_candidates = {{L"AI 功能已禁用或配置无效", L"✦ 错误"}};
-    return;
-  }
-  const std::string base_url = _LlmValue(text_config, "base_url");
-  const std::string model = _LlmValue(text_config, "model");
-  const std::string api_key = _LlmValue(text_config, "api_key");
-  const std::string configured_scheme =
-      _LlmValue(text_config, "input_scheme", "auto");
-
-  const std::string legacy_comment =
-      _LlmValue(text_config, "ai_comment_text", "✦ AI");
-  const bool has_legacy_comment =
-      text_config.find("ai_comment_text") != text_config.end();
-  const std::string predict_comment =
-      _LlmValue(text_config, "ai_predict_comment",
-                has_legacy_comment ? legacy_comment : "✦ AI预测");
-  const std::string continuation_comment =
-      _LlmValue(text_config, "ai_continuation_comment",
-                has_legacy_comment ? legacy_comment : "✦ AI续写");
-  const int continuation_count =
-      std::clamp(_LlmInt(text_config, "continuation_count", 2), 0, 5);
-
-  std::string prompt_both =
-      _DecodePromptEscapes(_LlmValue(text_config, "prompt_both"));
-  std::string prompt_initials_only =
-      _DecodePromptEscapes(_LlmValue(text_config, "prompt_initials_only"));
-  const int timeout_ms =
-      std::clamp(_LlmInt(text_config, "timeout_ms", 3000), 500, 30000);
-  const int candidate_count =
-      std::clamp(_LlmInt(text_config, "candidate_count", 5), 1, 10);
-  const bool cache_enabled = _LlmBool(text_config, "cache_enabled", true);
-  const int configured_cache_ttl =
-      _LlmInt(text_config, "cache_ttl_seconds", 300);
-  const int cache_ttl_seconds =
-      configured_cache_ttl < 0 ? 0 : configured_cache_ttl;
-  const int configured_cache_max_entries =
-      _LlmInt(text_config, "cache_max_entries", 500);
-  const int cache_max_entries =
-      configured_cache_max_entries < 0 ? 0 : configured_cache_max_entries;
-  const double temperature =
-      std::clamp(_LlmDouble(text_config, "temperature", 0.0), 0.0, 2.0);
-  const bool show_ai_comment =
-      _LlmBool(text_config, "ai_comment_enabled", true);
-  std::string debug_context_mode =
-      _LlmValue(text_config, "debug_context", "off");
-  std::transform(debug_context_mode.begin(), debug_context_mode.end(),
-                 debug_context_mode.begin(),
-                 [](unsigned char c) { return static_cast<char>(tolower(c)); });
-  if (debug_context_mode != "preview" && debug_context_mode != "full")
-    debug_context_mode = "off";
-  const int debug_context_preview_chars = std::clamp(
-      _LlmInt(text_config, "debug_context_preview_chars", 100), 0, 2000);
-  const std::wstring debug_log_path =
-      (WeaselUserDataPath() / L"llm_debug.log").wstring();
-
-  const DWORD ipc_id_snapshot = ipc_id;
-  const std::wstring request_snapshot = session_status.llm_request_id;
-  const uint64_t generation_snapshot = session_status.llm_generation;
-  std::wstring context_snapshot =
-      session_status.llm_context_enabled ? context : std::wstring();
-  std::string context_source = !session_status.llm_context_enabled
-                                   ? "disabled"
-                                   : (context.empty() ? "empty" : "tsf");
-  if (session_status.llm_context_enabled && context.empty() &&
-      _LlmBool(text_config, "context_recent_commits_fallback", false) &&
-      !session_status.llm_recent_commits.empty() &&
-      session_status.llm_context_chars > 0) {
-    context_snapshot = session_status.llm_recent_commits;
-    const size_t limit = static_cast<size_t>(session_status.llm_context_chars);
-    if (context_snapshot.size() > limit)
-      context_snapshot.erase(0, context_snapshot.size() - limit);
-    context_source = "recent_commits";
-  }
-  const std::wstring context_diagnostic = session_status.llm_context_diagnostic;
-  const auto input_snapshot =
-      weasel_llm::ParseInput(session_status.llm_raw_input,
-                             session_status.llm_schema_id, configured_scheme);
-  session_status.llm_request_submitted = true;
-  session_status.llm_request_pending = false;
-  session_status.llm_ai_comment_enabled = !!show_ai_comment;
-  session_status.llm_ai_comment = u8tow(predict_comment.c_str());
-  session_status.llm_context = context_snapshot;
-  auto worker_it = m_llm_workers.begin();
-  while (worker_it != m_llm_workers.end()) {
-    if (worker_it->done && worker_it->done->load()) {
-      if (worker_it->thread.joinable())
-        worker_it->thread.join();
-      worker_it = m_llm_workers.erase(worker_it);
-    } else {
-      ++worker_it;
-    }
-  }
-  m_llm_workers.push_back({});
-  auto done = std::make_shared<std::atomic_bool>(false);
-  m_llm_workers.back().done = done;
-  try {
-    m_llm_workers.back().thread = std::thread(
-        [this, done, ipc_id_snapshot, request_snapshot, generation_snapshot,
-         context_snapshot, input_snapshot, base_url, model, api_key,
-         prompt_both, prompt_initials_only, predict_comment,
-         continuation_comment, continuation_count, timeout_ms, temperature,
-         candidate_count, cache_enabled = !!cache_enabled, cache_ttl_seconds,
-         cache_max_entries, debug_log_path, debug_context_mode,
-         debug_context_preview_chars, context_source, context_diagnostic]() {
-          try {
-            auto response = weasel_llm::RequestCandidates(
-                u8tow(base_url), u8tow(model), u8tow(api_key),
-                u8tow(prompt_both), u8tow(prompt_initials_only),
-                u8tow(predict_comment), u8tow(continuation_comment),
-                continuation_count, context_snapshot, input_snapshot,
-                timeout_ms, temperature, candidate_count, cache_enabled,
-                cache_ttl_seconds, cache_max_entries, debug_log_path,
-                debug_context_mode, debug_context_preview_chars, context_source,
-                context_diagnostic);
-            std::vector<LlmCandidateItem> converted;
-            if (response.success) {
-              converted.reserve(response.candidates.size());
-              for (auto& item : response.candidates) {
-                converted.push_back(
-                    {std::move(item.text), std::move(item.comment)});
-              }
-            } else {
-              converted.push_back(
-                  {L"AI失败: " + response.error_message, L"✦ 错误"});
-            }
-            {
-              std::lock_guard<std::mutex> lock(m_llm_results_mutex);
-              m_llm_results.push_back({ipc_id_snapshot, request_snapshot,
-                                       generation_snapshot, response.success,
-                                       std::move(converted)});
-            }
-            if (_AsyncRefreshCallback)
-              _AsyncRefreshCallback(ipc_id_snapshot);
-          } catch (...) {
-          }
-          done->store(true);
-        });
-  } catch (...) {
-    m_llm_workers.pop_back();
-    session_status.llm_request_submitted = false;
-  }
-}
-
-void RimeWithWeaselHandler::SubmitLlmContext(WeaselSessionId ipc_id,
-                                             const std::wstring& request_id,
-                                             const std::wstring& context,
-                                             EatLine eat,
-                                             const std::wstring& diagnostic) {
-  auto it = m_session_status_map.find(ipc_id);
-  if (it == m_session_status_map.end())
-    return;
-  SessionStatus& session_status = it->second;
-  if (request_id.empty() || request_id != session_status.llm_request_id ||
-      session_status.llm_raw_input.empty()) {
-    if (eat)
-      _Respond(ipc_id, eat);
-    return;
-  }
-  session_status.llm_context_diagnostic =
-      diagnostic.empty() ? L"client_diagnostic_unavailable" : diagnostic;
-  _StartLlmWorker(session_status, ipc_id, context);
-  if (eat)
-    _Respond(ipc_id, eat);
-}
-
-bool RimeWithWeaselHandler::PollSession(WeaselSessionId ipc_id, EatLine eat) {
-  auto it = m_session_status_map.find(ipc_id);
-  if (it != m_session_status_map.end()) {
-    SessionStatus& session_status = it->second;
-    if (session_status.llm_loading && !session_status.llm_request_submitted) {
-      if (!session_status.llm_context_enabled) {
-        _StartLlmWorker(session_status, ipc_id, L"");
-      } else if (++session_status.llm_context_polls >= 100) {
-        session_status.llm_loading = false;
-        session_status.llm_is_error = true;
-        session_status.llm_request_pending = false;
-        session_status.llm_request_id.clear();
-        session_status.llm_candidates = {
-            {L"AI失败: 未收到 TSF 上下文，请重启应用并确认 TSF DLL 已更新",
-             L"✦ 错误"}};
-      }
-    }
-  }
-  _Respond(ipc_id, eat);
-  return true;
-}
-
-void RimeWithWeaselHandler::RefreshSession(DWORD ipc_id) {
-  std::vector<LlmResult> ready;
-  {
-    std::lock_guard<std::mutex> lock(m_llm_results_mutex);
-    auto it = m_llm_results.begin();
-    while (it != m_llm_results.end()) {
-      if (it->ipc_id == ipc_id) {
-        ready.push_back(std::move(*it));
-        it = m_llm_results.erase(it);
-      } else {
-        ++it;
-      }
-    }
-  }
-  auto session = m_session_status_map.find(ipc_id);
-  if (session == m_session_status_map.end())
-    return;
-  for (auto& result : ready) {
-    auto& status = session->second;
-    if (result.request_id == status.llm_request_id &&
-        result.generation == status.llm_generation) {
-      status.llm_loading = false;
-      status.llm_is_error = !result.success;
-      status.llm_candidates = std::move(result.candidates);
-      status.llm_page_active = true;
-      if (status.llm_candidates.empty())
-        status.llm_request_submitted = false;
-      break;
-    }
-  }
-  if (!session->second.llm_candidates.empty() || session->second.llm_loading ||
-      session->second.llm_is_error)
-    _UpdateUI(ipc_id);
 }
 
 void RimeWithWeaselHandler::UpdateInputPosition(RECT const& rc,
@@ -1357,45 +685,9 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
         static_cast<size_t>(i), runtime_labels, runtime_keys,
         schema_select_labels, schema_select_keys));
   }
-  const SessionStatus* llm_session = nullptr;
-  for (const auto& item : m_session_status_map) {
-    if (item.second.session_id == session_id) {
-      llm_session = &item.second;
-      break;
-    }
-  }
-  if (llm_session && !llm_session->llm_candidates.empty() &&
-      llm_session->llm_page_active) {
-    const bool is_status =
-        llm_session->llm_loading || llm_session->llm_is_error;
-    const size_t count = llm_session->llm_candidates.size();
-    cinfo.candies.resize(count);
-    cinfo.comments.resize(count);
-    cinfo.labels.resize(count);
-    for (size_t i = 0; i < count; ++i) {
-      cinfo.candies[i].str = escape_string(llm_session->llm_candidates[i].text);
-      cinfo.comments[i].str =
-          (llm_session->llm_ai_comment_enabled || is_status)
-              ? escape_string(llm_session->llm_candidates[i].comment)
-              : std::wstring();
-      if (is_status) {
-        cinfo.labels[i].str = llm_session->llm_loading ? L"[AI]" : L"[!]";
-      } else {
-        cinfo.labels[i].str = escape_string(weasel::FormatCandidateLabel(
-            i, runtime_labels, runtime_keys, schema_select_labels,
-            schema_select_keys));
-      }
-    }
-    cinfo.highlighted = 0;
-    cinfo.currentPage = 0;
-    cinfo.is_last_page = false;
-  } else {
-    cinfo.highlighted = ctx.menu.highlighted_candidate_index;
-    cinfo.currentPage =
-        ctx.menu.page_no +
-        ((llm_session && !llm_session->llm_candidates.empty()) ? 1 : 0);
-    cinfo.is_last_page = ctx.menu.is_last_page;
-  }
+  cinfo.highlighted = ctx.menu.highlighted_candidate_index;
+  cinfo.currentPage = ctx.menu.page_no;
+  cinfo.is_last_page = ctx.menu.is_last_page;
 
   cinfo.current_detail.clear();
   cinfo.current_detail_width = 0;
@@ -1448,26 +740,6 @@ void RimeWithWeaselHandler::EndMaintenance() {
 void RimeWithWeaselHandler::SetOption(WeaselSessionId ipc_id,
                                       const std::string& opt,
                                       bool val) {
-  if (opt == "ascii_mode") {
-    auto it = m_session_status_map.find(ipc_id);
-    if (it != m_session_status_map.end()) {
-      ++it->second.llm_generation;
-      it->second.llm_request_id.clear();
-      it->second.llm_candidates.clear();
-      it->second.llm_commit_text.clear();
-      it->second.llm_request_pending = false;
-      it->second.llm_request_submitted = false;
-    } else if (!ipc_id) {
-      for (auto& session : m_session_status_map) {
-        ++session.second.llm_generation;
-        session.second.llm_request_id.clear();
-        session.second.llm_candidates.clear();
-        session.second.llm_commit_text.clear();
-        session.second.llm_request_pending = false;
-        session.second.llm_request_submitted = false;
-      }
-    }
-  }
   // from no-session client, not actual typing session
   if (!ipc_id) {
     if (m_global_ascii_mode && opt == "ascii_mode") {
@@ -1780,24 +1052,10 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
   RIME_STRUCT(RimeCommit, commit);
   if (rime_api->get_commit(session_id, &commit)) {
     actions.push_back("commit");
-    session_status.llm_recent_commits += u8tow(commit.text);
     std::wstring commit_text_w = escape_string(u8tow(commit.text));
     body.append(L"commit=").append(commit_text_w).append(L"\n");
     rime_api->free_commit(&commit);
   }
-  if (!session_status.llm_commit_text.empty()) {
-    session_status.llm_recent_commits += session_status.llm_commit_text;
-    actions.push_back("commit");
-    body.append(L"commit=")
-        .append(escape_string(session_status.llm_commit_text))
-        .append(L"\n");
-    session_status.llm_commit_text.clear();
-    session_status.llm_candidates.clear();
-  }
-
-  if (session_status.llm_recent_commits.size() > 2000)
-    session_status.llm_recent_commits.erase(
-        0, session_status.llm_recent_commits.size() - 2000);
 
   bool is_composing = false;
   RIME_STRUCT(RimeStatus, status);
@@ -1834,8 +1092,7 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
 
   RIME_STRUCT(RimeContext, ctx);
   if (rime_api->get_context(session_id, &ctx)) {
-    bool has_candidates =
-        ctx.menu.num_candidates > 0 || !session_status.llm_candidates.empty();
+    bool has_candidates = ctx.menu.num_candidates > 0;
     CandidateInfo cinfo;
     if (has_candidates) {
       _GetCandidateInfo(cinfo, ctx, session_id);
@@ -1901,7 +1158,7 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
               session_status.style.mark_text.empty()
                   ? std::wstring(L"*")
                   : session_status.style.mark_text;
-          for (size_t i = 0; i < cinfo.candies.size(); i++) {
+          for (auto i = 0; i < ctx.menu.num_candidates; i++) {
             std::wstring label_w;
             if (label_valid) {
               wchar_t buf_lbl[128];
@@ -1912,13 +1169,13 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
             }
             std::wstring comment_w =
                 comment_valid ? cinfo.comments.at(i).str : std::wstring();
-            std::wstring prefix_w = (static_cast<int>(i) != cinfo.highlighted)
+            std::wstring prefix_w = (i != ctx.menu.highlighted_candidate_index)
                                         ? std::wstring()
                                         : mark_text_w;
             body.append(L" ")
                 .append(prefix_w)
                 .append(escape_string(label_w))
-                .append(cinfo.candies.at(i).str)
+                .append(escape_string(u8tow(ctx.menu.candidates[i].text)))
                 .append(L" ")
                 .append(escape_string(comment_w));
           }
@@ -1951,22 +1208,6 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
       }
     }
     rime_api->free_context(&ctx);
-  }
-
-  if (session_status.llm_request_pending &&
-      !session_status.llm_request_submitted) {
-    body.append(L"ctx.llm.request_id=")
-        .append(escape_string(session_status.llm_request_id))
-        .append(L"\n")
-        .append(L"ctx.llm.context_enabled=")
-        .append(Bool_wstring[session_status.llm_context_enabled])
-        .append(L"\n")
-        .append(L"ctx.llm.context_chars=")
-        .append(std::to_wstring(session_status.llm_context_chars))
-        .append(L"\n")
-        .append(L"ctx.llm.boundary_search_chars=")
-        .append(std::to_wstring(session_status.llm_boundary_search_chars))
-        .append(L"\n");
   }
 
   char undo_action[64] = {0};
@@ -2450,8 +1691,7 @@ void RimeWithWeaselHandler::_RemapCandidateNavigationKey(
   RIME_STRUCT(RimeContext, context);
   if (!rime_api->get_context(session_id, &context))
     return;
-  const bool has_candidates =
-      context.menu.num_candidates > 0 || !session_status.llm_candidates.empty();
+  const bool has_candidates = context.menu.num_candidates > 0;
   rime_api->free_context(&context);
   if (!has_candidates)
     return;

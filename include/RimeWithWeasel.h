@@ -2,12 +2,8 @@
 #include <WeaselIPC.h>
 #include <WeaselUI.h>
 #include <map>
-#include <memory>
 #include <string>
 #include <mutex>
-#include <thread>
-#include <atomic>
-#include <vector>
 
 #include <DynamicCandidateLayout.h>
 #include <DynamicCandidateSelectKeys.h>
@@ -28,29 +24,13 @@ typedef std::map<std::string, bool> AppOptions;
 typedef std::map<std::string, AppOptions, CaseInsensitiveCompare>
     AppOptionsByAppName;
 
-struct LlmCandidateItem {
-  std::wstring text;
-  std::wstring comment;
-};
-
 struct SessionStatus {
   SessionStatus()
       : style(weasel::UIStyle()),
         configured_layout_type(weasel::UIStyle::LAYOUT_VERTICAL),
         fullscreen(false),
         __synced(false),
-        session_id(0),
-        llm_generation(0),
-        llm_context_enabled(false),
-        llm_context_chars(0),
-        llm_boundary_search_chars(0),
-        llm_request_pending(false),
-        llm_request_submitted(false),
-        llm_loading(false),
-        llm_is_error(false),
-        llm_page_active(true),
-        llm_ai_comment_enabled(false),
-        llm_ai_comment() {
+        session_id(0) {
     RIME_STRUCT(RimeStatus, status);
   }
   weasel::UIStyle style;
@@ -60,27 +40,6 @@ struct SessionStatus {
   RimeStatus status;
   bool __synced;
   RimeSessionId session_id;
-  uint64_t llm_generation;
-  std::wstring llm_request_id;
-  std::wstring llm_config_path;
-  std::string llm_raw_input;
-  std::string llm_schema_id;
-  bool llm_context_enabled;
-  int llm_context_chars;
-  int llm_boundary_search_chars;
-  bool llm_request_pending;
-  bool llm_request_submitted;
-  bool llm_loading;
-  bool llm_is_error;
-  bool llm_page_active;
-  bool llm_ai_comment_enabled;
-  std::wstring llm_ai_comment;
-  std::wstring llm_context;
-  unsigned int llm_context_polls = 0;
-  std::wstring llm_context_diagnostic;
-  std::wstring llm_recent_commits;
-  std::vector<LlmCandidateItem> llm_candidates;
-  std::wstring llm_commit_text;
 };
 typedef std::map<DWORD, SessionStatus> SessionStatusMap;
 typedef DWORD WeaselSessionId;
@@ -106,13 +65,6 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   virtual bool ChangePage(bool backward, WeaselSessionId ipc_id, EatLine eat);
   virtual void FocusIn(DWORD param, WeaselSessionId ipc_id);
   virtual void FocusOut(DWORD param, WeaselSessionId ipc_id);
-  virtual void SubmitLlmContext(WeaselSessionId ipc_id,
-                                const std::wstring& request_id,
-                                const std::wstring& context,
-                                EatLine eat = 0,
-                                const std::wstring& diagnostic = L"");
-  virtual bool PollSession(WeaselSessionId ipc_id, EatLine eat = 0);
-  virtual void RefreshSession(DWORD ipc_id);
   virtual void UpdateInputPosition(RECT const& rc, WeaselSessionId ipc_id);
   virtual void StartMaintenance();
   virtual void EndMaintenance();
@@ -122,9 +74,6 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   virtual void UpdateColorTheme(BOOL darkMode);
 
   void OnUpdateUI(std::function<void()> const& cb);
-  void SetAsyncRefresh(std::function<void(DWORD)> const& cb) {
-    _AsyncRefreshCallback = cb;
-  }
 
  private:
   void _Setup();
@@ -155,9 +104,6 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
                                     weasel::KeyEvent& key_event);
 
   void _UpdateInlinePreeditStatus(WeaselSessionId ipc_id);
-  void _StartLlmWorker(SessionStatus& session_status,
-                       WeaselSessionId ipc_id,
-                       const std::wstring& context);
 
   RimeSessionId to_session_id(WeaselSessionId ipc_id) {
     return m_session_status_map[ipc_id].session_id;
@@ -182,21 +128,6 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   std::map<std::string, bool> m_show_notifications;
   std::map<std::string, bool> m_show_notifications_base;
   std::function<void()> _UpdateUICallback;
-  std::function<void(DWORD)> _AsyncRefreshCallback;
-  struct LlmResult {
-    DWORD ipc_id;
-    std::wstring request_id;
-    uint64_t generation;
-    bool success;
-    std::vector<LlmCandidateItem> candidates;
-  };
-  struct LlmWorker {
-    std::thread thread;
-    std::shared_ptr<std::atomic_bool> done;
-  };
-  std::mutex m_llm_results_mutex;
-  std::vector<LlmResult> m_llm_results;
-  std::vector<LlmWorker> m_llm_workers;
 
   static void OnNotify(void* context_object,
                        uintptr_t session_id,

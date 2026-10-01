@@ -64,23 +64,6 @@ bool ClientImpl::ProcessKeyEvent(KeyEvent const& keyEvent) {
   return ret != 0;
 }
 
-bool ClientImpl::SubmitLlmContext(const std::wstring& request_id,
-                                  const std::wstring& context,
-                                  const std::wstring& diagnostic) {
-  if (!_Active())
-    return false;
-  channel << L"llm.request_id=" << escape_string(request_id) << L"\n"
-          << L"llm.context=" << escape_string(context) << L"\n"
-          << L"llm.diagnostic=" << escape_string(diagnostic) << L"\n.\n";
-  return _SendMessage(WEASEL_IPC_LLM_CONTEXT, 0, session_id) != 0;
-}
-
-bool ClientImpl::PollSession() {
-  if (!_Active())
-    return false;
-  return _SendMessage(WEASEL_IPC_POLL_SESSION, 0, session_id) != 0;
-}
-
 bool ClientImpl::CommitComposition() {
   if (!_Active())
     return false;
@@ -239,16 +222,6 @@ void Client::ShutdownServer() {
 
 bool Client::ProcessKeyEvent(KeyEvent const& keyEvent) {
   return m_pImpl->ProcessKeyEvent(keyEvent);
-}
-
-bool Client::SubmitLlmContext(const std::wstring& request_id,
-                              const std::wstring& context,
-                              const std::wstring& diagnostic) {
-  return m_pImpl->SubmitLlmContext(request_id, context, diagnostic);
-}
-
-bool Client::PollSession() {
-  return m_pImpl->PollSession();
 }
 
 bool Client::CommitComposition() {

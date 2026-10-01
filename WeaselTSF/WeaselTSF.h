@@ -118,10 +118,6 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   BOOL _ShowInlinePreedit(com_ptr<ITfContext> pContext,
                           const std::shared_ptr<weasel::Context> context);
   void _UpdateComposition(com_ptr<ITfContext> pContext);
-  std::wstring _ReadTextBeforeCaret(TfEditCookie ec,
-                                    ITfContext* pContext,
-                                    LONG maxChars,
-                                    std::wstring& diagnostic);
   BOOL _IsComposing();
   BOOL _IsCurrentComposition(ITfComposition* pComposition);
   void _SetComposition(com_ptr<ITfComposition> pComposition);
@@ -144,11 +140,6 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   void _ShowUI();
   void _HideUI();
   com_ptr<ITfContext> _GetUIContextDocument();
-
-  /* LLM Polling */
-  void _StartLlmPolling(com_ptr<ITfContext> pContext);
-  void _StopLlmPolling();
-  void _OnLlmTimer(UINT_PTR timer_id);
 
   /* Undo simulation */
   void _SimulateUndo();
@@ -248,7 +239,5 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   BOOL _async_edit = false;
   BOOL _committed = false;
   BOOL _isToOpenClose = false;
-  UINT_PTR _llm_timer_id = 0;
-  int _llm_poll_ticks = 0;
   int _simulated_keys_to_skip = 0;
 };
