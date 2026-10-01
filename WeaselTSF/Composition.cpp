@@ -397,33 +397,86 @@ BOOL WeaselTSF::_InsertText(com_ptr<ITfContext> pContext,
   return TRUE;
 }
 
-// Use a separate asynchronous edit session so hosts can publish the deletion
-// before a restored preedit changes the text store again.
+// Chromium drains queued edit locks before publishing changes to its editor.
+// Post a private window message instead, so the current lock request returns
+// to the host before composition restoration requests another edit lock.
 class CResumeReopenEditSession : public CEditSession {
  public:
   CResumeReopenEditSession(com_ptr<WeaselTSF> service,
                            com_ptr<ITfContext> context,
                            com_ptr<ITfRange> range,
-                           const std::wstring& text)
-      : CEditSession(service, context), _range(range), _text(text) {}
+                           const std::wstring& text,
+                           TfClientId clientId)
+      : CEditSession(service, context),
+        _range(range),
+        _text(text),
+        _clientId(clientId) {}
   STDMETHODIMP DoEditSession(TfEditCookie ec) override {
     return _pTextService->_CompleteReopen(ec, _pContext, _range, _text);
   }
+  bool Post() {
+    HWND window =
+        CreateWindowExW(0, L"STATIC", L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr,
+                        GetModuleHandleW(nullptr), nullptr);
+    if (!window)
+      return false;
+    SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+    if (GetWindowLongPtrW(window, GWLP_USERDATA) !=
+        reinterpret_cast<LONG_PTR>(this)) {
+      DestroyWindow(window);
+      return false;
+    }
+    if (!SetWindowLongPtrW(window, GWLP_WNDPROC,
+                           reinterpret_cast<LONG_PTR>(&WindowProc))) {
+      DestroyWindow(window);
+      return false;
+    }
+    AddRef();  // The private window owns a reference until WM_NCDESTROY.
+    if (!PostMessageW(window, WM_APP, 0, 0)) {
+      DestroyWindow(window);
+      return false;
+    }
+    return true;
+  }
 
  private:
+  static LRESULT CALLBACK WindowProc(HWND window,
+                                     UINT message,
+                                     WPARAM wParam,
+                                     LPARAM lParam) {
+    auto* session = reinterpret_cast<CResumeReopenEditSession*>(
+        GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (message == WM_APP && session) {
+      OutputDebugStringW(
+          L"Weasel reopen: restore dispatched after message boundary\n");
+      HRESULT result = E_FAIL;
+      const HRESULT hr = session->_pContext->RequestEditSession(
+          session->_clientId, session, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE,
+          &result);
+      if (FAILED(hr) || FAILED(result))
+        OutputDebugStringW(
+            L"Weasel reopen: posted restore edit lock rejected\n");
+      DestroyWindow(window);
+      return 0;
+    }
+    if (message == WM_NCDESTROY && session) {
+      SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+      session->Release();
+    }
+    return DefWindowProcW(window, message, wParam, lParam);
+  }
   com_ptr<ITfRange> _range;
   std::wstring _text;
+  TfClientId _clientId;
 };
 
 bool WeaselTSF::_QueueReopen(com_ptr<ITfContext> context,
                              com_ptr<ITfRange> range,
                              const std::wstring& text) {
   com_ptr<CResumeReopenEditSession> session;
-  session.Attach(new CResumeReopenEditSession(this, context, range, text));
-  HRESULT result = E_FAIL;
-  const HRESULT hr = context->RequestEditSession(
-      _tfClientId, session, TF_ES_ASYNC | TF_ES_READWRITE, &result);
-  return SUCCEEDED(hr) && SUCCEEDED(result);
+  session.Attach(
+      new CResumeReopenEditSession(this, context, range, text, _tfClientId));
+  return session->Post();
 }
 
 void WeaselTSF::_ForgetLastCommit() {
@@ -452,6 +505,13 @@ void WeaselTSF::_RememberLastCommit(TfEditCookie ec,
   _last_commit_range = saved;
   _last_commit_end = end;
   _last_commit_text = text;
+  TF_STATUS status = {};
+  if (SUCCEEDED(context->GetStatus(&status))) {
+    OutputDebugStringW(
+        status.dwStaticFlags & TF_SS_TRANSITORY
+            ? L"Weasel reopen: recorded in transitory context\n"
+            : L"Weasel reopen: recorded in persistent context\n");
+  }
 }
 
 bool WeaselTSF::_ValidateLastCommit(TfEditCookie ec,
@@ -484,10 +544,14 @@ bool WeaselTSF::_ValidateLastCommit(TfEditCookie ec,
     com_ptr<ITfRange> recovered;
     LONG shifted = 0;
     const LONG length = static_cast<LONG>(_last_commit_text.size());
-    if (FAILED(_last_commit_end->Clone(&recovered)) ||
-        FAILED(recovered->ShiftStart(ec, -length, &shifted, nullptr)) ||
-        shifted != -length)
-      return fail(L"Weasel reopen: validation cannot recover saved range\n");
+    if (FAILED(_last_commit_end->Clone(&recovered)))
+      return fail(L"Weasel reopen: validation saved anchor clone failed\n");
+    if (FAILED(recovered->ShiftStart(ec, -length, &shifted, nullptr)))
+      return fail(L"Weasel reopen: validation backward range shift failed\n");
+    if (shifted != -length)
+      return fail(
+          L"Weasel reopen: validation saved anchor cannot reach committed "
+          L"text\n");
     if (!matches(recovered))
       return fail(mismatch);
     recovered->SetGravity(ec, TF_GRAVITY_FORWARD, TF_GRAVITY_BACKWARD);
