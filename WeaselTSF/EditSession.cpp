@@ -25,15 +25,10 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
       _StopCloudPolling();
       if (_ReopenLastCommit(ec, _pEditSessionContext,
                             context->undo_action.substr(reopenPrefix.size()))) {
-        // Resume configuration and consume its response under the same lock.
-        // This avoids another queued key response overwriting the callback.
-        if (m_client.ProcessKeyEvent(weasel::KeyEvent(ibus::F35, 0))) {
-          const HRESULT result = DoEditSession(ec);
-          _FinishReopen();
-          return result;
-        }
-        _RollbackReopen(ec, _pEditSessionContext);
-        _EndComposition(_pEditSessionContext, false);
+        // Deletion must reach the host before a separate edit session restores
+        // composition and notifies configuration through F35.
+        _UpdateUI(*context, _status);
+        return TRUE;
       } else {
         // An asynchronous commit may still be waiting for its end session.
         // Refusing reopen must not clear that committed composition.

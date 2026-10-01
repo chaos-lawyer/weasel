@@ -397,6 +397,35 @@ BOOL WeaselTSF::_InsertText(com_ptr<ITfContext> pContext,
   return TRUE;
 }
 
+// Use a separate asynchronous edit session so hosts can publish the deletion
+// before a restored preedit changes the text store again.
+class CResumeReopenEditSession : public CEditSession {
+ public:
+  CResumeReopenEditSession(com_ptr<WeaselTSF> service,
+                           com_ptr<ITfContext> context,
+                           com_ptr<ITfRange> range,
+                           const std::wstring& text)
+      : CEditSession(service, context), _range(range), _text(text) {}
+  STDMETHODIMP DoEditSession(TfEditCookie ec) override {
+    return _pTextService->_CompleteReopen(ec, _pContext, _range, _text);
+  }
+
+ private:
+  com_ptr<ITfRange> _range;
+  std::wstring _text;
+};
+
+bool WeaselTSF::_QueueReopen(com_ptr<ITfContext> context,
+                             com_ptr<ITfRange> range,
+                             const std::wstring& text) {
+  com_ptr<CResumeReopenEditSession> session;
+  session.Attach(new CResumeReopenEditSession(this, context, range, text));
+  HRESULT result = E_FAIL;
+  const HRESULT hr = context->RequestEditSession(
+      _tfClientId, session, TF_ES_ASYNC | TF_ES_READWRITE, &result);
+  return SUCCEEDED(hr) && SUCCEEDED(result);
+}
+
 void WeaselTSF::_ForgetLastCommit() {
   _last_commit_range = nullptr;
   _last_commit_end = nullptr;
@@ -427,18 +456,28 @@ void WeaselTSF::_RememberLastCommit(TfEditCookie ec,
 
 bool WeaselTSF::_ValidateLastCommit(TfEditCookie ec,
                                     com_ptr<ITfContext> context) {
-  if (!_last_commit_range || !_last_commit_end ||
-      context != _last_commit_context)
+  auto fail = [](const wchar_t* reason) {
+    OutputDebugStringW(reason);
     return false;
+  };
+  if (!_last_commit_range || !_last_commit_end)
+    return fail(L"Weasel reopen: validation missing range anchor\n");
+  if (context != _last_commit_context)
+    return fail(L"Weasel reopen: validation context changed\n");
 
+  const wchar_t* mismatch = L"Weasel reopen: validation text differs\n";
   auto matches = [&](com_ptr<ITfRange> range) {
     std::wstring actual(_last_commit_text.size() + 1, L'\0');
     ULONG fetched = 0;
     if (FAILED(range->GetText(ec, 0, actual.data(),
                               static_cast<ULONG>(actual.size()), &fetched)) ||
-        fetched != _last_commit_text.size())
+        fetched != _last_commit_text.size()) {
+      mismatch =
+          L"Weasel reopen: validation text unreadable or length differs\n";
       return false;
+    }
     actual.resize(fetched);
+    mismatch = L"Weasel reopen: validation text differs\n";
     return actual == _last_commit_text;
   };
   if (!matches(_last_commit_range)) {
@@ -447,8 +486,10 @@ bool WeaselTSF::_ValidateLastCommit(TfEditCookie ec,
     const LONG length = static_cast<LONG>(_last_commit_text.size());
     if (FAILED(_last_commit_end->Clone(&recovered)) ||
         FAILED(recovered->ShiftStart(ec, -length, &shifted, nullptr)) ||
-        shifted != -length || !matches(recovered))
-      return false;
+        shifted != -length)
+      return fail(L"Weasel reopen: validation cannot recover saved range\n");
+    if (!matches(recovered))
+      return fail(mismatch);
     recovered->SetGravity(ec, TF_GRAVITY_FORWARD, TF_GRAVITY_BACKWARD);
     _last_commit_range = recovered;
   }
@@ -456,7 +497,7 @@ bool WeaselTSF::_ValidateLastCommit(TfEditCookie ec,
   com_ptr<ITfRange> position;
   if (_IsComposing()) {
     if (FAILED(_pComposition->GetRange(&position)))
-      return false;
+      return fail(L"Weasel reopen: validation composition range unavailable\n");
     LONG comparison = 0;
     if (SUCCEEDED(position->CompareStart(ec, _last_commit_end, TF_ANCHOR_START,
                                          &comparison)) &&
@@ -472,7 +513,7 @@ bool WeaselTSF::_ValidateLastCommit(TfEditCookie ec,
         FAILED(position->CompareEnd(ec, _last_commit_range, TF_ANCHOR_END,
                                     &end)) ||
         start != 0 || end != 0)
-      return false;
+      return fail(L"Weasel reopen: validation composition is not adjacent\n");
     position = nullptr;
   }
   TF_SELECTION selection = {};
@@ -480,15 +521,17 @@ bool WeaselTSF::_ValidateLastCommit(TfEditCookie ec,
   if (FAILED(context->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &selection,
                                    &count)) ||
       count != 1)
-    return false;
+    return fail(L"Weasel reopen: validation selection unavailable\n");
   position.Attach(selection.range);
   BOOL empty = FALSE;
   if (FAILED(position->IsEmpty(ec, &empty)) || !empty)
-    return false;
+    return fail(L"Weasel reopen: validation selection is not empty\n");
   LONG comparison = 0;
-  return SUCCEEDED(position->CompareStart(ec, _last_commit_end, TF_ANCHOR_START,
-                                          &comparison)) &&
-         comparison == 0;
+  if (FAILED(position->CompareStart(ec, _last_commit_end, TF_ANCHOR_START,
+                                    &comparison)) ||
+      comparison != 0)
+    return fail(L"Weasel reopen: validation caret is not at saved end\n");
+  return true;
 }
 
 bool WeaselTSF::_ReopenLastCommit(TfEditCookie ec,
@@ -535,12 +578,8 @@ bool WeaselTSF::_ReopenLastCommit(TfEditCookie ec,
   }
 
   com_ptr<ITfRange> range;
-  com_ptr<ITfContextComposition> compositions;
-  com_ptr<ITfComposition> composition;
   if (FAILED(_last_commit_range->Clone(&range)) ||
-      FAILED(range->SetGravity(ec, TF_GRAVITY_BACKWARD, TF_GRAVITY_FORWARD)) ||
-      FAILED(context->QueryInterface(IID_ITfContextComposition,
-                                     (LPVOID*)&compositions))) {
+      FAILED(range->SetGravity(ec, TF_GRAVITY_BACKWARD, TF_GRAVITY_FORWARD))) {
     OutputDebugStringW(L"Weasel reopen: cannot prepare replacement range\n");
     return false;
   }
@@ -564,20 +603,87 @@ bool WeaselTSF::_ReopenLastCommit(TfEditCookie ec,
   selection.range = range;
   selection.style.ase = TF_AE_NONE;
   selection.style.fInterimChar = FALSE;
-  if (FAILED(context->SetSelection(ec, 1, &selection)) ||
+  if (FAILED(context->SetSelection(ec, 1, &selection))) {
+    _RollbackReopen(ec, context);
+    OutputDebugStringW(L"Weasel reopen: cannot position after deletion\n");
+    return false;
+  }
+  _ForgetLastCommit();
+  if (!_QueueReopen(context, range, expectedText)) {
+    _RollbackReopen(ec, context);
+    OutputDebugStringW(L"Weasel reopen: cannot queue restore session\n");
+    return false;
+  }
+  OutputDebugStringW(L"Weasel reopen: deletion staged, restore queued\n");
+  return true;
+}
+
+HRESULT WeaselTSF::_CompleteReopen(TfEditCookie ec,
+                                   com_ptr<ITfContext> context,
+                                   com_ptr<ITfRange> range,
+                                   const std::wstring& text) {
+  BOOL empty = FALSE;
+  if (FAILED(range->IsEmpty(ec, &empty)) || !empty) {
+    if (_reopen_range == range)
+      _FinishReopen();
+    OutputDebugStringW(L"Weasel reopen: restore cancelled, target changed\n");
+    return S_OK;
+  }
+  if (_reopen_range != range) {
+    // A focus loss/abort cancelled the request between edit sessions. Restore
+    // only a still-empty span, without changing the user's current selection.
+    if (FAILED(range->SetText(ec, 0, text.c_str(),
+                              static_cast<LONG>(text.size()))))
+      OutputDebugStringW(
+          L"Weasel reopen: cancelled restore text write failed\n");
+    return S_OK;
+  }
+  TF_SELECTION selection = {};
+  ULONG count = 0;
+  com_ptr<ITfRange> caret;
+  LONG start = 1, end = 1;
+  if (SUCCEEDED(context->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &selection,
+                                      &count)) &&
+      count == 1) {
+    caret.Attach(selection.range);
+    caret->CompareStart(ec, range, TF_ANCHOR_START, &start);
+    caret->CompareEnd(ec, range, TF_ANCHOR_END, &end);
+  }
+  if (context != _pEditSessionContext || _IsComposing() || start != 0 ||
+      end != 0) {
+    // Keep a moved selection where the user put it. The range was verified
+    // empty above, so restoring its text does not replace a new composition.
+    if (FAILED(range->SetText(ec, 0, text.c_str(),
+                              static_cast<LONG>(text.size()))))
+      OutputDebugStringW(
+          L"Weasel reopen: cancelled restore text write failed\n");
+    _FinishReopen();
+    OutputDebugStringW(
+        L"Weasel reopen: restore cancelled, context or caret changed\n");
+    return S_OK;
+  }
+  com_ptr<ITfContextComposition> compositions;
+  com_ptr<ITfComposition> composition;
+  if (FAILED(context->QueryInterface(IID_ITfContextComposition,
+                                     (LPVOID*)&compositions)) ||
       FAILED(compositions->StartComposition(ec, range, this, &composition)) ||
       !composition) {
     _RollbackReopen(ec, context);
     OutputDebugStringW(
         L"Weasel reopen: host rejected composition, rolled back\n");
-    return false;
+    return S_OK;
   }
-
   _SetComposition(composition);
-  _ForgetLastCommit();
   _cand->StartUI();
   OutputDebugStringW(L"Weasel reopen: ready for configuration callback\n");
-  return true;
+  if (m_client.ProcessKeyEvent(weasel::KeyEvent(ibus::F35, 0))) {
+    const HRESULT result = DoEditSession(ec);
+    _FinishReopen();
+    return result;
+  }
+  _RollbackReopen(ec, context);
+  _EndComposition(context, false);
+  return S_OK;
 }
 
 void WeaselTSF::_FinishReopen() {

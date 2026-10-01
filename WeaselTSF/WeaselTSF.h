@@ -163,6 +163,13 @@ class WeaselTSF : public ITfTextInputProcessorEx,
 
   void _RollbackReopen(TfEditCookie ec, com_ptr<ITfContext> context);
   void _FinishReopen();
+  bool _QueueReopen(com_ptr<ITfContext> context,
+                    com_ptr<ITfRange> range,
+                    const std::wstring& text);
+  HRESULT _CompleteReopen(TfEditCookie ec,
+                          com_ptr<ITfContext> context,
+                          com_ptr<ITfRange> range,
+                          const std::wstring& text);
 
   /* Undo simulation */
   void _RequestUndo(com_ptr<ITfContext> pContext);
