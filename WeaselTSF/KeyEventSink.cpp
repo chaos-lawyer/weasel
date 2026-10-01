@@ -210,6 +210,7 @@ BOOL WeaselTSF::_InitKeyEventSink() {
 }
 
 void WeaselTSF::_UninitKeyEventSink() {
+  _ForgetLastCommit();
   _CancelUndo();
   _undo_input_active = false;
   _undo_marker_release = false;

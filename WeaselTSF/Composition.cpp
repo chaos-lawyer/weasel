@@ -368,6 +368,8 @@ STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
                              static_cast<LONG>(_text.length()))))
     return E_FAIL;
 
+  _pTextService->_RememberLastCommit(ec, _pContext, pRange, _text);
+
   /* update the selection to an insertion point just past the inserted text. */
   pRange->Collapse(ec, TF_ANCHOR_END);
 
@@ -393,6 +395,131 @@ BOOL WeaselTSF::_InsertText(com_ptr<ITfContext> pContext,
   }
 
   return TRUE;
+}
+
+void WeaselTSF::_ForgetLastCommit() {
+  _last_commit_range = nullptr;
+  _last_commit_context = nullptr;
+  _last_commit_text.clear();
+  _last_commit_focus = nullptr;
+}
+
+void WeaselTSF::_RememberLastCommit(TfEditCookie ec,
+                                    com_ptr<ITfContext> context,
+                                    com_ptr<ITfRange> range,
+                                    const std::wstring& text) {
+  _ForgetLastCommit();
+  com_ptr<ITfRange> saved;
+  if (text.empty() || !range || FAILED(range->Clone(&saved)) ||
+      FAILED(saved->SetGravity(ec, TF_GRAVITY_FORWARD, TF_GRAVITY_BACKWARD)))
+    return;
+  // Save before the caller collapses its range. Appending the next input at
+  // this range's end must not expand it to include the trigger composition.
+  _last_commit_context = context;
+  _last_commit_range = saved;
+  _last_commit_text = text;
+  _last_commit_focus = GetFocus();
+}
+
+bool WeaselTSF::_ValidateLastCommit(TfEditCookie ec,
+                                    com_ptr<ITfContext> context) {
+  if (!_last_commit_range || context != _last_commit_context ||
+      GetFocus() != _last_commit_focus)
+    return false;
+
+  // Read an extra character to reject a range that grew beyond our commit.
+  std::wstring actual(_last_commit_text.size() + 1, L'\0');
+  ULONG fetched = 0;
+  if (FAILED(_last_commit_range->GetText(
+          ec, 0, actual.data(), static_cast<ULONG>(actual.size()), &fetched)) ||
+      fetched != _last_commit_text.size())
+    return false;
+  actual.resize(fetched);
+  if (actual != _last_commit_text)
+    return false;
+
+  com_ptr<ITfRange> position;
+  if (_IsComposing()) {
+    if (FAILED(_pComposition->GetRange(&position)))
+      return false;
+    LONG comparison = 0;
+    if (SUCCEEDED(position->CompareStart(ec, _last_commit_range, TF_ANCHOR_END,
+                                         &comparison)) &&
+        comparison == 0)
+      return true;
+
+    // OnEndEdit may run between an asynchronous insert session and its end
+    // session. The just-committed composition still covers the saved range;
+    // keep the record only if both ranges match and the caret is at its end.
+    LONG start = 0, end = 0;
+    if (FAILED(position->CompareStart(ec, _last_commit_range, TF_ANCHOR_START,
+                                      &start)) ||
+        FAILED(position->CompareEnd(ec, _last_commit_range, TF_ANCHOR_END,
+                                    &end)) ||
+        start != 0 || end != 0)
+      return false;
+    position = nullptr;
+  }
+  TF_SELECTION selection = {};
+  ULONG count = 0;
+  if (FAILED(context->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &selection,
+                                   &count)) ||
+      count != 1)
+    return false;
+  position.Attach(selection.range);
+  BOOL empty = FALSE;
+  if (FAILED(position->IsEmpty(ec, &empty)) || !empty)
+    return false;
+  LONG comparison = 0;
+  return SUCCEEDED(position->CompareStart(ec, _last_commit_range, TF_ANCHOR_END,
+                                          &comparison)) &&
+         comparison == 0;
+}
+
+bool WeaselTSF::_ReopenLastCommit(TfEditCookie ec,
+                                  com_ptr<ITfContext> context,
+                                  const std::wstring& expectedText) {
+  if (expectedText.empty() || expectedText != _last_commit_text ||
+      !_ValidateLastCommit(ec, context))
+    return false;
+
+  // End the trigger synchronously under this edit lock. A queued end session
+  // could otherwise run after the replacement composition has been created.
+  if (_IsComposing()) {
+    com_ptr<ITfComposition> trigger = _pComposition;
+    com_ptr<ITfRange> range;
+    LONG comparison = 0;
+    if (FAILED(trigger->GetRange(&range)) ||
+        FAILED(range->CompareStart(ec, _last_commit_range, TF_ANCHOR_END,
+                                   &comparison)) ||
+        comparison != 0 || FAILED(range->SetText(ec, 0, L"", 0)))
+      return false;
+    _ClearCompositionDisplayAttributes(ec, context);
+    _FinalizeComposition();
+    if (FAILED(trigger->EndComposition(ec)))
+      return false;
+  }
+  if (!_ValidateLastCommit(ec, context))
+    return false;
+
+  com_ptr<ITfRange> range;
+  com_ptr<ITfContextComposition> compositions;
+  com_ptr<ITfComposition> composition;
+  if (FAILED(_last_commit_range->Clone(&range)) ||
+      FAILED(range->SetGravity(ec, TF_GRAVITY_BACKWARD, TF_GRAVITY_FORWARD)) ||
+      FAILED(context->QueryInterface(IID_ITfContextComposition,
+                                     (LPVOID*)&compositions)))
+    return false;
+  if (FAILED(compositions->StartComposition(ec, range, this, &composition)) ||
+      !composition)
+    return false;
+
+  _SetComposition(composition);
+  _ForgetLastCommit();
+  _cand->StartUI();
+  // Leave the committed text in the new composition until restored preedit
+  // or the next candidate replaces it. No application undo is involved.
+  return true;
 }
 
 void WeaselTSF::_UpdateComposition(com_ptr<ITfContext> pContext) {
@@ -449,6 +576,7 @@ STDMETHODIMP WeaselTSF::OnCompositionTerminated(TfEditCookie ecWrite,
 void WeaselTSF::_AbortComposition(bool clear) {
   _StopCloudPolling();
   _CancelUndo();
+  _ForgetLastCommit();
   m_client.ClearComposition();
   _status.composing = false;
   if (_IsComposing()) {

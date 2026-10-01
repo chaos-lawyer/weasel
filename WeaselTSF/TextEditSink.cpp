@@ -20,6 +20,11 @@ static BOOL IsRangeCovered(TfEditCookie ec,
 STDMETHODIMP WeaselTSF::OnEndEdit(ITfContext* pContext,
                                   TfEditCookie ecReadOnly,
                                   ITfEditRecord* pEditRecord) {
+  // Invalidate as soon as the caret leaves our commit/adjacent composition,
+  // or the document no longer contains exactly the text we recorded.
+  if (_last_commit_range && !_ValidateLastCommit(ecReadOnly, pContext))
+    _ForgetLastCommit();
+
   BOOL fSelectionChanged;
   IEnumTfRanges* pEnumTextChanges;
   ITfRange* pRange;

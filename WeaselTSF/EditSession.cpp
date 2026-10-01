@@ -19,6 +19,38 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
   bool compositionEnded = false;
   if (ok) {
     compositionEnded = false;
+    const std::wstring reopenPrefix = L"reopen_last_commit:";
+    if (context->undo_action.compare(0, reopenPrefix.size(), reopenPrefix) ==
+        0) {
+      _StopCloudPolling();
+      if (_ReopenLastCommit(ec, _pEditSessionContext,
+                            context->undo_action.substr(reopenPrefix.size()))) {
+        // Resume configuration and consume its response under the same lock.
+        // This avoids another queued key response overwriting the callback.
+        if (m_client.ProcessKeyEvent(weasel::KeyEvent(ibus::F35, 0)))
+          return DoEditSession(ec);
+        _EndComposition(_pEditSessionContext, false);
+      } else {
+        // An asynchronous commit may still be waiting for its end session.
+        // Refusing reopen must not clear that committed composition.
+        bool clearTrigger = true;
+        if (_IsComposing() && _last_commit_range) {
+          com_ptr<ITfRange> range;
+          LONG start = 0, end = 0;
+          if (SUCCEEDED(_pComposition->GetRange(&range)) &&
+              SUCCEEDED(range->CompareStart(ec, _last_commit_range,
+                                            TF_ANCHOR_START, &start)) &&
+              SUCCEEDED(range->CompareEnd(ec, _last_commit_range, TF_ANCHOR_END,
+                                          &end)) &&
+              start == 0 && end == 0)
+            clearTrigger = false;
+        }
+        _EndComposition(_pEditSessionContext, clearTrigger);
+      }
+      _ForgetLastCommit();
+      _UpdateUI(*context, _status);
+      return TRUE;
+    }
     if (context->undo_action == L"ctrl_z") {
       // The configuration resumes through F35 after the tagged undo input.
       // Never start a replacement composition in the undo request session.

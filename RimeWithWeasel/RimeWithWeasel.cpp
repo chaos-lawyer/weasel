@@ -1234,7 +1234,7 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
   body.append(L"ctx.cloud_pending=")
       .append(std::string(cloud_pending) == "1" ? L"1\n" : L"0\n");
 
-  char undo_action[64] = {0};
+  char undo_action[65536] = {0};
   if (rime_api->get_property(session_id, "undo_action", undo_action,
                              sizeof(undo_action)) &&
       undo_action[0] != '\0') {
@@ -1242,7 +1242,9 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
     if (std::find(actions.begin(), actions.end(), "ctx") == actions.end()) {
       actions.push_back("ctx");
     }
-    body.append(L"ctx.undo=").append(u8tow(undo_action)).append(L"\n");
+    body.append(L"ctx.undo=")
+        .append(escape_string(u8tow(undo_action)))
+        .append(L"\n");
   }
 
   // configuration information

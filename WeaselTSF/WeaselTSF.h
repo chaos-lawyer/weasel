@@ -150,6 +150,17 @@ class WeaselTSF : public ITfTextInputProcessorEx,
                                com_ptr<ITfContext> context,
                                UINT_PTR timer_id);
 
+  /* Reopen the last committed range; configuration owns restored input. */
+  void _ForgetLastCommit();
+  void _RememberLastCommit(TfEditCookie ec,
+                           com_ptr<ITfContext> context,
+                           com_ptr<ITfRange> range,
+                           const std::wstring& text);
+  bool _ValidateLastCommit(TfEditCookie ec, com_ptr<ITfContext> context);
+  bool _ReopenLastCommit(TfEditCookie ec,
+                         com_ptr<ITfContext> context,
+                         const std::wstring& expectedText);
+
   /* Undo simulation */
   void _RequestUndo(com_ptr<ITfContext> pContext);
   void _SimulateUndo(ULONG_PTR inputTag);
@@ -260,6 +271,10 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   bool _cloud_poll_queued = false;
   HWND _cloud_focus = nullptr;
   com_ptr<ITfContext> _cloud_context;
+  com_ptr<ITfContext> _last_commit_context;
+  com_ptr<ITfRange> _last_commit_range;
+  std::wstring _last_commit_text;
+  HWND _last_commit_focus = nullptr;
   bool _undo_input_active = false;
   bool _undo_marker_release = false;
   ULONG_PTR _undo_input_tag = 0;
