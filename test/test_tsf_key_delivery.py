@@ -33,9 +33,10 @@ struct WeaselTSF {
   BOOL _fTestKeyDownPending = FALSE, _fTestKeyUpPending = FALSE;
   bool _async_edit = false;
   std::vector<WPARAM> sent;
-  void _ProcessKeyEvent(WPARAM key, LPARAM, BOOL* eaten) {
+  bool _ProcessKeyEvent(ITfContext*, WPARAM key, LPARAM, BOOL* eaten) {
     sent.push_back(key);
     *eaten = TRUE;
+    return true;
   }
   void _UpdateComposition(ITfContext*) {}
   int OnTestKeyDown(ITfContext*, WPARAM, LPARAM, BOOL*);

@@ -8,6 +8,7 @@
 #include <DynamicCandidateLayout.h>
 #include <DynamicCandidateSelectKeys.h>
 #include <rime_api.h>
+#include <CloudCandidate.h>
 
 struct CaseInsensitiveCompare {
   bool operator()(const std::string& str1, const std::string& str2) const {
@@ -79,6 +80,9 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
 
  private:
   void _Setup();
+  void _ServiceCloud(RimeSessionId session_id);
+  std::unique_ptr<cloud::CloudCandidateManager> m_cloud;
+  std::map<RimeSessionId, cloud::CloudQueryContext> m_cloud_queries;
   bool _IsDeployerRunning();
   void _UpdateUI(WeaselSessionId ipc_id);
   void _LoadSchemaSpecificSettings(WeaselSessionId ipc_id,

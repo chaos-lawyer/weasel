@@ -1,0 +1,25 @@
+name: Cloud candidate core and WinHTTP
+on:
+  push:
+    paths:
+      - 'include/CloudCandidate.h'
+      - 'RimeWithWeasel/CloudCandidate.cpp'
+      - 'test/TestCloudCandidate/**'
+      - '.github/workflows/cloud-candidate.yml'
+  pull_request:
+    paths:
+      - 'include/CloudCandidate.h'
+      - 'RimeWithWeasel/CloudCandidate.cpp'
+      - 'test/TestCloudCandidate/**'
+      - '.github/workflows/cloud-candidate.yml'
+jobs:
+  test:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        configuration: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S test/TestCloudCandidate -B build/cloud-tests -A x64
+      - run: cmake --build build/cloud-tests --config ${{ matrix.configuration }}
+      - run: ctest --test-dir build/cloud-tests -C ${{ matrix.configuration }} --output-on-failure

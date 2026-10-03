@@ -29,6 +29,7 @@ using LPARAM = intptr_t;
 using LPBYTE = unsigned char*;
 using BOOL = int;
 using Bool = int;
+uint64_t GetTickCount64() { return 0; }
 constexpr int TRUE = 1, FALSE = 0, True = 1, False = 0;
 #include <KeyEvent.h>
 #include <DynamicCandidateLayout.h>
@@ -44,7 +45,9 @@ struct RecordingApi {
   size_t candidates = 5;
   int calls = 0, selections = 0, key = 0, mask = 0;
   Bool handled = True;
-  Bool get_property(RimeSessionId, const char*, char* out, size_t size) {
+  void set_property(RimeSessionId, const char*, const char*) {}
+  Bool get_property(RimeSessionId, const char* key, char* out, size_t size) {
+    if (std::strcmp(key, "candidate_select_keys") != 0) { out[0] = 0; return False; }
     std::strncpy(out, select_keys.c_str(), size - 1);
     return !select_keys.empty();
   }
@@ -72,6 +75,7 @@ struct RimeWithWeaselHandler {
   SessionStatus& get_session_status(WeaselSessionId) { return status; }
   void _Respond(WeaselSessionId, EatLine) {}
   void _UpdateUI(WeaselSessionId) {}
+  void _ServiceCloud(RimeSessionId) {}
   BOOL ProcessKeyEvent(KeyEvent, WeaselSessionId, EatLine);
   void _RemapCandidateNavigationKey(SessionStatus&, RimeSessionId, KeyEvent&);
 };

@@ -299,6 +299,8 @@ void RimeWithWeaselHandler::Initialize() {
 }
 
 void RimeWithWeaselHandler::Finalize() {
+  m_cloud_queries.clear();
+  m_cloud.reset();
   m_active_session = 0;
   m_disabled = true;
   m_session_status_map.clear();
@@ -376,6 +378,9 @@ DWORD RimeWithWeaselHandler::RemoveSession(WeaselSessionId ipc_id) {
     return 0;
   DLOG(INFO) << "Remove session: session_id = " << to_session_id(ipc_id);
   // TODO: force committing? otherwise current composition would be lost
+  if (m_cloud)
+    m_cloud->Cancel(to_session_id(ipc_id));
+  m_cloud_queries.erase(to_session_id(ipc_id));
   rime_api->destroy_session(to_session_id(ipc_id));
   m_session_status_map.erase(ipc_id);
   m_active_session = 0;
@@ -433,6 +438,7 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
         rime_api->get_property(session_id, "cloud_pending", pending,
                                sizeof(pending)) &&
         std::string(pending) == "1") {
+      _ServiceCloud(session_id);
       rime_api->process_key(session_id, ibus::F34, 0);
       _UpdateUI(ipc_id);
     }
@@ -482,6 +488,7 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
     handled = rime_api->process_key(session_id, keyEvent.keycode,
                                     expand_ibus_modifier(keyEvent.mask));
   }
+  _ServiceCloud(session_id);
   // vim_mode when keydown only
   if (!handled && !(keyEvent.mask & ibus::Modifier::RELEASE_MASK)) {
     bool isVimBackInCommandMode =
@@ -564,6 +571,13 @@ void RimeWithWeaselHandler::FocusIn(DWORD client_caps, WeaselSessionId ipc_id) {
 }
 
 void RimeWithWeaselHandler::FocusOut(DWORD param, WeaselSessionId ipc_id) {
+  const auto session = to_session_id(ipc_id);
+  if (m_cloud)
+    m_cloud->Cancel(session);
+  m_cloud_queries.erase(session);
+  rime_api->set_property(session, "cloud_native_identity", "");
+  rime_api->set_property(session, "cloud_native_response", "");
+  rime_api->set_property(session, "cloud_pending", "");
   DLOG(INFO) << "Focus out: ipc_id = " << ipc_id;
   if (m_ui)
     m_ui->Hide();
@@ -2201,4 +2215,112 @@ void RimeWithWeaselHandler::_UpdateInlinePreeditStatus(WeaselSessionId ipc_id) {
   rime_api->set_option(session_id, "inline_preedit", Bool(inline_preedit));
   // show soft cursor on weasel panel but not inline
   rime_api->set_option(session_id, "soft_cursor", Bool(!inline_preedit));
+}
+
+// Property bridge runs in the existing IPC dispatch under g_api_mutex.
+// Worker callbacks never touch Rime, Lua, TSF or the candidate window.
+void RimeWithWeaselHandler::_ServiceCloud(RimeSessionId session_id) {
+  auto property = [&](const char* key) {
+    char buffer[16384] = {};
+    rime_api->get_property(session_id, key, buffer, sizeof(buffer));
+    return std::string(buffer);
+  };
+  const auto identity = property("cloud_native_identity");
+  auto existing = m_cloud_queries.find(session_id);
+  if (existing != m_cloud_queries.end() &&
+      identity != existing->second.query_id) {
+    if (m_cloud)
+      m_cloud->Cancel(session_id);
+    m_cloud_queries.erase(existing);
+  }
+  const auto request = property("cloud_native_request");
+  if (!request.empty()) {
+    rime_api->set_property(session_id, "cloud_native_request", "");
+    const auto split = request.find('|');
+    const auto next =
+        split == std::string::npos ? split : request.find('|', split + 1);
+    if (next != std::string::npos && request.substr(0, split) == identity) {
+      RIME_STRUCT(RimeStatus, status);
+      RimeConfig config = {};
+      cloud::CloudSettings settings;
+      if (rime_api->get_status(session_id, &status)) {
+        if (rime_api->schema_open(status.schema_id, &config)) {
+          auto boolean = [&](const char* path, bool& target) {
+            Bool value;
+            if (rime_api->config_get_bool(&config, path, &value))
+              target = !!value;
+          };
+          boolean("cloud_candidate/enabled", settings.enabled);
+          boolean("cloud_candidate/sogou/enabled", settings.sogou_enabled);
+          boolean("cloud_candidate/cache/enabled", settings.cache_enabled);
+          boolean("cloud_candidate/privacy/enabled", settings.privacy_enabled);
+          boolean("cloud_candidate/privacy/disable_in_password_field",
+                  settings.disable_in_password_field);
+          rime_api->config_get_int(&config, "cloud_candidate/sogou/timeout_ms",
+                                   &settings.timeout_ms);
+          rime_api->config_get_int(&config, "cloud_candidate/cache/ttl_seconds",
+                                   &settings.ttl_seconds);
+          rime_api->config_get_int(&config, "cloud_candidate/cache/max_entries",
+                                   &settings.max_entries);
+          char provider[64] = {};
+          if (rime_api->config_get_string(&config, "cloud_candidate/provider",
+                                          provider, sizeof(provider)))
+            settings.provider = provider;
+          rime_api->config_close(&config);
+        }
+        rime_api->free_status(&status);
+      }
+      const char* raw = rime_api->get_input(session_id);
+      std::string input = raw ? raw : "";
+      // TODO: propagate TSF IS_PASSWORD/secure-input state through IPC. The
+      // existing TSF keyboard-disabled path blocks conventional secure fields,
+      // but hosts that only expose InputScope require an explicit signal.
+      const bool password = property("cloud_password_field") == "1";
+      const bool special_mode = property("cloud_native_allowed") != "1";
+      if (cloud::CloudPrivacyPolicy::Allows(settings, input, password,
+                                            special_mode)) {
+        if (!m_cloud) {
+          m_cloud = std::make_unique<cloud::CloudCandidateManager>(
+              [](const std::string& message) { DLOG(INFO) << message; });
+          m_cloud->Register(
+              std::make_shared<cloud::SogouProvider>(cloud::QuerySogou));
+        }
+        cloud::CloudQueryContext context;
+        context.session = session_id;
+        context.query_id = identity;
+        context.composition_revision =
+            request.substr(split + 1, next - split - 1);
+        context.input_snapshot = input;
+        m_cloud_queries[session_id] = context;
+        m_cloud->Submit(request.substr(next + 1), context, settings);
+      } else {
+        rime_api->set_property(session_id, "cloud_native_response",
+                               (identity + "|failed").c_str());
+      }
+    }
+  }
+  existing = m_cloud_queries.find(session_id);
+  if (m_cloud && existing != m_cloud_queries.end()) {
+    const char* input = rime_api->get_input(session_id);
+    auto context = existing->second;
+    if (context.input_snapshot != (input ? input : "") ||
+        identity != context.query_id) {
+      m_cloud->Cancel(session_id);
+      m_cloud_queries.erase(existing);
+      return;
+    }
+    auto result = m_cloud->Take(context);
+    if (result) {
+      std::string response =
+          context.query_id + (result->success ? "|ok" : "|failed");
+      for (const auto& candidate : result->candidates)
+        response += "\n" + candidate.text;
+      rime_api->set_property(session_id, "cloud_native_response",
+                             response.c_str());
+      m_cloud_queries.erase(existing);
+      // Cache completion is immediate; F34 makes the Lua filter rebuild the
+      // menu.
+      rime_api->process_key(session_id, ibus::F34, 0);
+    }
+  }
 }
