@@ -1,9 +1,5 @@
-#ifndef WEASEL_CLOUD_STANDALONE
-#include "stdafx.h"
-#else
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#endif
 #include <CloudCandidate.h>
 #include <winhttp.h>
 #pragma comment(lib, "winhttp.lib")
