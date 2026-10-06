@@ -13,6 +13,15 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
                                 &_cand->style());
 
   bool ok = m_client.GetResponseData(std::ref(parser));
+  if (!ok || !commit.empty()) {
+    wchar_t message[256];
+    swprintf_s(message,
+               L"[weasel_tsf_commit_probe] event=response pid=%lu tid=%lu "
+               L"ok=%d utf16_units=%zu composing=%d\n",
+               GetCurrentProcessId(), GetCurrentThreadId(), ok ? 1 : 0,
+               commit.size(), _IsComposing() ? 1 : 0);
+    OutputDebugStringW(message);
+  }
 
   _UpdateLanguageBar(_status);
 

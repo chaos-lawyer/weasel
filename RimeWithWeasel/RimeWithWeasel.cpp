@@ -1088,8 +1088,19 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
 
   SessionStatus& session_status = get_session_status(ipc_id);
   RimeSessionId session_id = session_status.session_id;
+  char client_app[64] = {0};
+  const bool word_probe =
+      rime_api->get_property(session_id, "client_app", client_app,
+                             sizeof(client_app)) &&
+      std::string(client_app) == "winword.exe";
+  size_t commit_bytes = 0;
   RIME_STRUCT(RimeCommit, commit);
   if (rime_api->get_commit(session_id, &commit)) {
+    commit_bytes = commit.text ? std::strlen(commit.text) : 0;
+    if (word_probe) {
+      LOG(INFO) << "[word_commit_transport_probe] event=server_get_commit"
+                << " ipc_id=" << ipc_id << " bytes=" << commit_bytes;
+    }
     actions.push_back("commit");
     std::wstring commit_text_w = escape_string(u8tow(commit.text));
     body.append(L"commit=").append(commit_text_w).append(L"\n");
@@ -1301,11 +1312,23 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
     }
     header = std::wstring(L"action=") + u8tow(actionList) + L"\n";
   }
-  if (!eat(header))
+  if (!eat(header)) {
+    if (word_probe && commit_bytes) {
+      LOG(INFO) << "[word_commit_transport_probe] event=server_response"
+                << " ipc_id=" << ipc_id << " bytes=" << commit_bytes
+                << " stage=header result=failed";
+    }
     return false;
+  }
 
   body.append(L".\n");
-  if (!eat(body))
+  const bool body_sent = eat(body);
+  if (word_probe && commit_bytes) {
+    LOG(INFO) << "[word_commit_transport_probe] event=server_response"
+              << " ipc_id=" << ipc_id << " bytes=" << commit_bytes
+              << " stage=body result=" << (body_sent ? "ok" : "failed");
+  }
+  if (!body_sent)
     return false;
 
   return true;
