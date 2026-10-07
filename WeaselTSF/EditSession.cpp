@@ -3,6 +3,7 @@
 #include "CandidateList.h"
 #include "ResponseParser.h"
 #include "EditSession.h"
+#include <WordCommitTrace.h>
 
 STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
   // get commit string from server
@@ -21,6 +22,7 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
                GetCurrentProcessId(), GetCurrentThreadId(), ok ? 1 : 0,
                commit.size(), _IsComposing() ? 1 : 0);
     OutputDebugStringW(message);
+    weasel::AppendWordCommitTrace(message);
   }
 
   _UpdateLanguageBar(_status);

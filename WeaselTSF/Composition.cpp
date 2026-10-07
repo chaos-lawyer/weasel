@@ -3,6 +3,12 @@
 #include "EditSession.h"
 #include "ResponseParser.h"
 #include "CandidateList.h"
+#include <WordCommitTrace.h>
+
+static void TraceWordCommit(const wchar_t* message) {
+  OutputDebugStringW(message);
+  weasel::AppendWordCommitTrace(message);
+}
 
 /* Start Composition */
 class CStartCompositionEditSession : public CEditSession {
@@ -27,14 +33,14 @@ STDMETHODIMP CStartCompositionEditSession::DoEditSession(TfEditCookie ec) {
   com_ptr<ITfRange> pRangeComposition;
   if (_pContext->QueryInterface(IID_ITfInsertAtSelection,
                                 (LPVOID*)&pInsertAtSelection) != S_OK) {
-    OutputDebugStringW(
+    TraceWordCommit(
         L"[weasel_tsf_commit_probe] event=start stage=query_insert "
         L"result=failed\n");
     return hr;
   }
   if (pInsertAtSelection->InsertTextAtSelection(ec, TF_IAS_QUERYONLY, NULL, 0,
                                                 &pRangeComposition) != S_OK) {
-    OutputDebugStringW(
+    TraceWordCommit(
         L"[weasel_tsf_commit_probe] event=start stage=query_range "
         L"result=failed\n");
     return hr;
@@ -44,7 +50,7 @@ STDMETHODIMP CStartCompositionEditSession::DoEditSession(TfEditCookie ec) {
   com_ptr<ITfComposition> pComposition;
   if (_pContext->QueryInterface(IID_ITfContextComposition,
                                 (LPVOID*)&pContextComposition) != S_OK) {
-    OutputDebugStringW(
+    TraceWordCommit(
         L"[weasel_tsf_commit_probe] event=start stage=query_composition "
         L"result=failed\n");
     return hr;
@@ -73,7 +79,7 @@ STDMETHODIMP CStartCompositionEditSession::DoEditSession(TfEditCookie ec) {
              L"start_hr=0x%08X composition=%d return_hr=0x%08X\n",
              static_cast<unsigned int>(start_hr), pComposition ? 1 : 0,
              static_cast<unsigned int>(hr));
-  OutputDebugStringW(message);
+  TraceWordCommit(message);
 
   return hr;
 }
@@ -95,7 +101,7 @@ void WeaselTSF::_StartComposition(com_ptr<ITfContext> pContext,
                L"request_hr=0x%08X session_hr=0x%08X\n",
                static_cast<unsigned int>(request_hr),
                static_cast<unsigned int>(hr));
-    OutputDebugStringW(message);
+    TraceWordCommit(message);
   }
 }
 
@@ -311,7 +317,7 @@ STDMETHODIMP CInlinePreeditEditSession::DoEditSession(TfEditCookie ec) {
 
   com_ptr<ITfRange> pRangeComposition;
   if (_pComposition == nullptr) {
-    OutputDebugStringW(
+    TraceWordCommit(
         L"[weasel_tsf_commit_probe] event=preedit stage=composition "
         L"result=missing\n");
     return E_FAIL;
@@ -323,7 +329,7 @@ STDMETHODIMP CInlinePreeditEditSession::DoEditSession(TfEditCookie ec) {
                L"[weasel_tsf_commit_probe] event=preedit stage=get_range "
                L"hr=0x%08X\n",
                static_cast<unsigned int>(range_hr));
-    OutputDebugStringW(message);
+    TraceWordCommit(message);
     return E_FAIL;
   }
 
@@ -335,7 +341,7 @@ STDMETHODIMP CInlinePreeditEditSession::DoEditSession(TfEditCookie ec) {
                L"[weasel_tsf_commit_probe] event=preedit stage=set_text "
                L"hr=0x%08X\n",
                static_cast<unsigned int>(write_hr));
-    OutputDebugStringW(message);
+    TraceWordCommit(message);
     return E_FAIL;
   }
 
@@ -385,7 +391,7 @@ BOOL WeaselTSF::_ShowInlinePreedit(
                  L"request_hr=0x%08X session_hr=0x%08X\n",
                  static_cast<unsigned int>(request_hr),
                  static_cast<unsigned int>(hr));
-      OutputDebugStringW(message);
+      TraceWordCommit(message);
     }
   }
   return TRUE;
@@ -417,7 +423,7 @@ STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
   HRESULT write_hr = E_FAIL;
 
   if (_pComposition == nullptr) {
-    OutputDebugStringW(
+    TraceWordCommit(
         L"[weasel_tsf_commit_probe] event=write stage=composition "
         L"result=missing\n");
     return E_FAIL;
@@ -429,7 +435,7 @@ STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
                L"[weasel_tsf_commit_probe] event=write stage=get_range "
                L"hr=0x%08X\n",
                static_cast<unsigned int>(write_hr));
-    OutputDebugStringW(message);
+    TraceWordCommit(message);
     return E_FAIL;
   }
 
@@ -441,7 +447,7 @@ STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
                L"[weasel_tsf_commit_probe] event=write stage=set_text "
                L"hr=0x%08X\n",
                static_cast<unsigned int>(write_hr));
-    OutputDebugStringW(message);
+    TraceWordCommit(message);
     return E_FAIL;
   }
   {
@@ -450,7 +456,7 @@ STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
                L"[weasel_tsf_commit_probe] event=write stage=set_text "
                L"result=ok utf16_units=%zu\n",
                _text.size());
-    OutputDebugStringW(message);
+    TraceWordCommit(message);
   }
 
   _pTextService->_RememberLastCommit(ec, _pContext, pRange, _text);
@@ -487,7 +493,7 @@ BOOL WeaselTSF::_InsertText(com_ptr<ITfContext> pContext,
              GetCurrentProcessId(), GetCurrentThreadId(), text.size(),
              _pComposition ? 1 : 0, static_cast<unsigned int>(request_hr),
              static_cast<unsigned int>(hr));
-  OutputDebugStringW(message);
+  TraceWordCommit(message);
 
   return TRUE;
 }

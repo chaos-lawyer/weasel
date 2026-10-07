@@ -4,6 +4,7 @@
 #include <StringAlgorithm.hpp>
 #include <WeaselConstants.h>
 #include <WeaselUtility.h>
+#include <WordCommitTrace.h>
 
 #include <filesystem>
 #include <algorithm>
@@ -1098,8 +1099,12 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
   if (rime_api->get_commit(session_id, &commit)) {
     commit_bytes = commit.text ? std::strlen(commit.text) : 0;
     if (word_probe) {
-      LOG(INFO) << "[word_commit_transport_probe] event=server_get_commit"
-                << " ipc_id=" << ipc_id << " bytes=" << commit_bytes;
+      wchar_t message[192];
+      swprintf_s(message,
+                 L"[word_commit_transport_probe] event=server_get_commit "
+                 L"ipc_id=%lu bytes=%zu",
+                 ipc_id, commit_bytes);
+      weasel::AppendWordCommitTrace(message, false);
     }
     actions.push_back("commit");
     std::wstring commit_text_w = escape_string(u8tow(commit.text));
@@ -1314,9 +1319,12 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
   }
   if (!eat(header)) {
     if (word_probe && commit_bytes) {
-      LOG(INFO) << "[word_commit_transport_probe] event=server_response"
-                << " ipc_id=" << ipc_id << " bytes=" << commit_bytes
-                << " stage=header result=failed";
+      wchar_t message[192];
+      swprintf_s(message,
+                 L"[word_commit_transport_probe] event=server_response "
+                 L"ipc_id=%lu bytes=%zu stage=header result=failed",
+                 ipc_id, commit_bytes);
+      weasel::AppendWordCommitTrace(message, false);
     }
     return false;
   }
@@ -1324,9 +1332,12 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
   body.append(L".\n");
   const bool body_sent = eat(body);
   if (word_probe && commit_bytes) {
-    LOG(INFO) << "[word_commit_transport_probe] event=server_response"
-              << " ipc_id=" << ipc_id << " bytes=" << commit_bytes
-              << " stage=body result=" << (body_sent ? "ok" : "failed");
+    wchar_t message[192];
+    swprintf_s(message,
+               L"[word_commit_transport_probe] event=server_response "
+               L"ipc_id=%lu bytes=%zu stage=body result=%ls",
+               ipc_id, commit_bytes, body_sent ? L"ok" : L"failed");
+    weasel::AppendWordCommitTrace(message, false);
   }
   if (!body_sent)
     return false;
