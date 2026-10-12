@@ -72,6 +72,7 @@ STDMETHODIMP CStartCompositionEditSession::DoEditSession(TfEditCookie ec) {
     // end session is pending. Position only after the new composition has
     // actually been created, not from the response handler's stale range.
     _pTextService->_UpdateCompositionWindow(_pContext);
+    hr = S_OK;
   }
   wchar_t message[192];
   swprintf_s(message,
