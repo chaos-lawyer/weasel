@@ -275,6 +275,7 @@ void WeaselTSF::_UninitPreservedKey() {}
 
 void WeaselTSF::_InvalidateBackspace() {
   _backspace_armed = false;
+  _backspace_chain_valid = false;
   _backspace_h_trigger = false;
 }
 
@@ -297,6 +298,7 @@ void WeaselTSF::_ArmBackspace(com_ptr<ITfContext> context,
   _backspace_range_lost = false;
   _backspace_h_trigger = false;
   _backspace_armed = _reedit_mouse_hook != nullptr;
+  _backspace_chain_valid = _backspace_armed;
 }
 
 void WeaselTSF::_RemoveReeditMouseGuard() {
@@ -311,17 +313,30 @@ void WeaselTSF::_RemoveReeditMouseGuard() {
 }
 
 void WeaselTSF::_TrackReeditKey(WPARAM key, bool keyUp) {
-  if (keyUp || !_backspace_armed)
+  if (keyUp || (!_backspace_armed && !_backspace_chain_valid))
     return;
   const bool modified = GetKeyState(VK_CONTROL) < 0 ||
                         GetKeyState(VK_MENU) < 0 || GetKeyState(VK_SHIFT) < 0;
-  if (!modified && key == 'H' && !_backspace_h_trigger) {
+  if (_backspace_armed && !modified && key == 'H' && !_backspace_h_trigger) {
     _backspace_h_trigger = true;
     return;
   }
   if (!modified && key == VK_TAB && _backspace_h_trigger)
     return;
+  // Ordinary typing starts the next adjacent commit. It cancels immediate
+  // re-edit eligibility, but not the observed chain in a temporary context.
+  // Navigation, modifiers and mouse input invalidate both.
+  const bool typing =
+      !modified &&
+      (key == VK_SPACE || (key >= '0' && key <= '9') ||
+       (key >= 'A' && key <= 'Z') || (key >= 0x60 && key <= 0x6f) ||
+       (key >= 0xba && key <= 0xc0) || (key >= 0xdb && key <= 0xde) ||
+       key == 0xe2);
+  const bool keepChain = _backspace_chain_valid && typing &&
+                         _backspace_context == _pEditSessionContext &&
+                         _backspace_focus == GetFocus();
   _InvalidateBackspace();
+  _backspace_chain_valid = keepChain;
 }
 
 void WeaselTSF::_CancelUndo() {

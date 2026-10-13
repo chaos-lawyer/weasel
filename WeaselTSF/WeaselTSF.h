@@ -315,6 +315,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   HWND _backspace_focus = nullptr;
   HHOOK _reedit_mouse_hook = nullptr;
   bool _backspace_armed = false;
+  bool _backspace_chain_valid = false;
   bool _backspace_transitory = false;
   bool _backspace_range_lost = false;
   bool _backspace_h_trigger = false;

@@ -623,6 +623,9 @@ void WeaselTSF::_SyncLastCommitFields() {
   } else {
     _backspace_text = _backspace_history.back();
   }
+  // A pop may expose an older commit whose temporary range already vanished.
+  if (!_commit_history.empty() && !_last_commit_range && _backspace_transitory)
+    _backspace_range_lost = true;
 }
 
 void WeaselTSF::_ForgetLastCommit() {
@@ -645,8 +648,14 @@ void WeaselTSF::_RememberLastCommit(TfEditCookie ec,
     OutputDebugStringW(L"Weasel reopen: cannot record committed range\n");
     return;
   }
-  if (context != _last_commit_context) {
-    _ForgetLastCommit();
+  const bool temporaryChain = _backspace_range_lost && _backspace_chain_valid &&
+                              context == _backspace_context &&
+                              GetFocus() == _backspace_focus &&
+                              !_commit_history.empty();
+  if (context != _last_commit_context ||
+      (_backspace_range_lost && !temporaryChain)) {
+    if (!temporaryChain)
+      _ForgetLastCommit();
     _last_commit_context = context;
   }
 
@@ -661,6 +670,18 @@ void WeaselTSF::_RememberLastCommit(TfEditCookie ec,
   // composition ends. Never reconstruct from an arbitrary current caret.
   saved->SetGravity(ec, TF_GRAVITY_FORWARD, TF_GRAVITY_BACKWARD);
   end->SetGravity(ec, TF_GRAVITY_BACKWARD, TF_GRAVITY_BACKWARD);
+
+  if (temporaryChain && IsPunctuationText(text)) {
+    // Earlier ranges belong to an emptied transitory document. Preserve the
+    // actual deletion unit without pretending that punctuation's range covers
+    // the preceding word in that temporary document.
+    _commit_history.back().text += text;
+    _backspace_history.back() += text;
+    _SyncLastCommitFields();
+    _ArmBackspace(context, _backspace_text, true);
+    _backspace_range_lost = true;
+    return;
+  }
 
   // Check if this is an adjacent trailing punctuation commit that can merge
   // with the top entry
@@ -691,7 +712,7 @@ void WeaselTSF::_RememberLastCommit(TfEditCookie ec,
 
   // If there are existing entries, verify if the new commit is contiguous with
   // the previous end
-  if (!_commit_history.empty()) {
+  if (!_commit_history.empty() && !temporaryChain) {
     LONG comparison = 0;
     if (FAILED(range->CompareStart(ec, _commit_history.back().end,
                                    TF_ANCHOR_START, &comparison)) ||
@@ -1034,6 +1055,8 @@ HRESULT WeaselTSF::_CompleteReopen(TfEditCookie ec,
     _RollbackReopen(ec, context);
     OutputDebugStringW(
         L"Weasel reopen: host rejected composition, rolled back\n");
+    if (m_client.ProcessKeyEvent(weasel::KeyEvent(ibus::F33, 0)))
+      return DoEditSession(ec);
     return S_OK;
   }
   _SetComposition(composition);

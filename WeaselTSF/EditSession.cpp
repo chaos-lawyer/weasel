@@ -51,6 +51,8 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
         if (!_RequestBackspace(ec, _pEditSessionContext, text)) {
           OutputDebugStringW(L"Weasel reopen: backspace request refused\n");
           _ForgetLastCommit();
+          if (m_client.ProcessKeyEvent(weasel::KeyEvent(ibus::F33, 0)))
+            return DoEditSession(ec);
           _EndComposition(_pEditSessionContext, true);
         }
         _UpdateUI(*context, _status);
@@ -62,6 +64,12 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
         _UpdateUI(*context, _status);
         return TRUE;
       } else {
+        // Let configuration restore the previous preedit after a refused
+        // continuation. Do not end that composition before reading its reply.
+        if (m_client.ProcessKeyEvent(weasel::KeyEvent(ibus::F33, 0))) {
+          _ForgetLastCommit();
+          return DoEditSession(ec);
+        }
         // An asynchronous commit may still be waiting for its end session.
         // Refusing reopen must not clear that committed composition.
         bool clearTrigger = true;
