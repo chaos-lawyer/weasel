@@ -168,6 +168,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
     std::wstring text;
   };
   static constexpr size_t kMaxCommitHistory = 10;
+  void _CompleteBackspace();
   void _SyncLastCommitFields();
 
   void _RememberLastCommit(TfEditCookie ec,
@@ -306,6 +307,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   com_ptr<ITfRange> _last_commit_end;
   com_ptr<ITfRange> _reopen_range;
   std::wstring _reopen_text;
+  bool _reopen_popped = false;
   std::wstring _last_commit_text;
   std::vector<std::wstring> _backspace_history;
   com_ptr<ITfContext> _backspace_context;

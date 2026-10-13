@@ -22,7 +22,10 @@ STDMETHODIMP WeaselTSF::OnEndEdit(ITfContext* pContext,
                                   ITfEditRecord* pEditRecord) {
   // Invalidate as soon as the caret leaves our commit/adjacent composition,
   // or the document no longer contains exactly the text we recorded.
-  if (_last_commit_range && !_ValidateLastCommit(ecReadOnly, pContext)) {
+  // Injected BackSpace edits temporarily invalidate the top range. Its
+  // completion marker pops that entry before the restored preedit is written.
+  if (!(_undo_input_active && _undo_is_backspace) && _last_commit_range &&
+      !_ValidateLastCommit(ecReadOnly, pContext)) {
     OutputDebugStringW(L"Weasel reopen: recorded range invalidated by edit\n");
     if (!_DetectTransientReset(ecReadOnly, pContext))
       _ForgetLastCommit();

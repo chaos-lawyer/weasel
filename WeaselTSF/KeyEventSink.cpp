@@ -58,10 +58,12 @@ bool WeaselTSF::_ProcessKeyEvent(ITfContext* pContext,
         _CancelUndo();
         if (resume && (!_isToOpenClose || _IsKeyboardOpen()) &&
             !_IsKeyboardDisabled()) {
-          if (_undo_is_backspace)
+          if (_undo_is_backspace) {
+            _CompleteBackspace();
             OutputDebugStringW(
                 L"Weasel reopen: backspace delivered, notifying "
                 L"configuration\n");
+          }
           // F35 is a configuration notification, not a Windows keystroke.
           m_client.ProcessKeyEvent(weasel::KeyEvent(ibus::F35, 0));
           return true;

@@ -677,6 +677,10 @@ void WeaselTSF::_RememberLastCommit(TfEditCookie ec,
           _backspace_history.back() += text;
         }
         _SyncLastCommitFields();
+        TF_STATUS status = {};
+        const bool transitory = SUCCEEDED(context->GetStatus(&status)) &&
+                                (status.dwStaticFlags & TF_SS_TRANSITORY);
+        _ArmBackspace(context, _last_commit_text, transitory);
         OutputDebugStringW(
             L"Weasel reopen: merged trailing punctuation into commit "
             L"history\n");
@@ -863,6 +867,12 @@ bool WeaselTSF::_RequestBackspace(TfEditCookie ec,
     }
   }
   const unsigned count = static_cast<unsigned>(text.size());
+  OutputDebugStringW(L"Weasel reopen: using backspace compatibility\n");
+  _RequestInputAction(context, count);
+  return true;
+}
+
+void WeaselTSF::_CompleteBackspace() {
   if (!_commit_history.empty())
     _commit_history.pop_back();
   if (!_backspace_history.empty())
@@ -874,9 +884,6 @@ bool WeaselTSF::_RequestBackspace(TfEditCookie ec,
     _backspace_context = nullptr;
     _backspace_range_lost = false;
   }
-  OutputDebugStringW(L"Weasel reopen: using backspace compatibility\n");
-  _RequestInputAction(context, count);
-  return true;
 }
 
 bool WeaselTSF::_ReopenLastCommit(TfEditCookie ec,
@@ -964,6 +971,7 @@ bool WeaselTSF::_ReopenLastCommit(TfEditCookie ec,
     _backspace_context = nullptr;
     _backspace_range_lost = false;
   }
+  _reopen_popped = true;
   if (!_QueueReopen(context, range, expectedText)) {
     _RollbackReopen(ec, context);
     OutputDebugStringW(L"Weasel reopen: cannot queue restore session\n");
@@ -1044,6 +1052,7 @@ HRESULT WeaselTSF::_CompleteReopen(TfEditCookie ec,
 void WeaselTSF::_FinishReopen() {
   _reopen_range = nullptr;
   _reopen_text.clear();
+  _reopen_popped = false;
 }
 
 void WeaselTSF::_RollbackReopen(TfEditCookie ec, com_ptr<ITfContext> context) {
@@ -1051,6 +1060,8 @@ void WeaselTSF::_RollbackReopen(TfEditCookie ec, com_ptr<ITfContext> context) {
     if (SUCCEEDED(
             _reopen_range->SetText(ec, 0, _reopen_text.c_str(),
                                    static_cast<LONG>(_reopen_text.size())))) {
+      if (_reopen_popped)
+        _RememberLastCommit(ec, context, _reopen_range, _reopen_text);
       _reopen_range->Collapse(ec, TF_ANCHOR_END);
       TF_SELECTION selection = {};
       selection.range = _reopen_range;
