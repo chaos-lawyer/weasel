@@ -827,9 +827,12 @@ bool WeaselTSF::_DetectTransientReset(TfEditCookie ec,
       atBegin != 0 || atEnd != 0)
     return false;
   _backspace_range_lost = true;
-  _commit_history.clear();
-  _backspace_history.clear();
-  _SyncLastCommitFields();
+  _last_commit_range = nullptr;
+  _last_commit_end = nullptr;
+  for (auto& entry : _commit_history) {
+    entry.range = nullptr;
+    entry.end = nullptr;
+  }
   _last_commit_context = nullptr;
   OutputDebugStringW(
       L"Weasel reopen: temporary context reset, backspace eligible\n");
