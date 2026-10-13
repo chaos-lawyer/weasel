@@ -581,11 +581,55 @@ bool WeaselTSF::_QueueReopen(com_ptr<ITfContext> context,
   return session->Post();
 }
 
+static bool IsPunctuationChar(wchar_t ch) {
+  // ASCII punctuation
+  if ((ch >= 0x20 && ch <= 0x2F) || (ch >= 0x3A && ch <= 0x40) ||
+      (ch >= 0x5B && ch <= 0x60) || (ch >= 0x7B && ch <= 0x7E))
+    return true;
+  // General punctuation (quotes, dashes, ellipsis, bullet, etc.)
+  if (ch >= 0x2000 && ch <= 0x206F)
+    return true;
+  // CJK Symbols and Punctuation
+  if (ch >= 0x3000 && ch <= 0x303F)
+    return true;
+  // Fullwidth ASCII punctuation variants
+  if (ch >= 0xFF01 && ch <= 0xFF65)
+    return true;
+  return false;
+}
+
+static bool IsPunctuationText(const std::wstring& str) {
+  if (str.empty())
+    return false;
+  for (wchar_t ch : str) {
+    if (!IsPunctuationChar(ch))
+      return false;
+  }
+  return true;
+}
+
+void WeaselTSF::_SyncLastCommitFields() {
+  if (_commit_history.empty()) {
+    _last_commit_range = nullptr;
+    _last_commit_end = nullptr;
+    _last_commit_text.clear();
+  } else {
+    _last_commit_range = _commit_history.back().range;
+    _last_commit_end = _commit_history.back().end;
+    _last_commit_text = _commit_history.back().text;
+  }
+  if (_backspace_history.empty()) {
+    _backspace_text.clear();
+  } else {
+    _backspace_text = _backspace_history.back();
+  }
+}
+
 void WeaselTSF::_ForgetLastCommit() {
-  _last_commit_range = nullptr;
-  _last_commit_end = nullptr;
+  _commit_history.clear();
+  _backspace_history.clear();
+  _SyncLastCommitFields();
   _last_commit_context = nullptr;
-  _last_commit_text.clear();
   _InvalidateBackspace();
   _backspace_context = nullptr;
   _backspace_text.clear();
@@ -596,10 +640,20 @@ void WeaselTSF::_RememberLastCommit(TfEditCookie ec,
                                     com_ptr<ITfContext> context,
                                     com_ptr<ITfRange> range,
                                     const std::wstring& text) {
-  _ForgetLastCommit();
+  if (text.empty() || !range) {
+    _ForgetLastCommit();
+    OutputDebugStringW(L"Weasel reopen: cannot record committed range\n");
+    return;
+  }
+  if (context != _last_commit_context) {
+    _ForgetLastCommit();
+    _last_commit_context = context;
+  }
+
   com_ptr<ITfRange> saved, end;
-  if (text.empty() || !range || FAILED(range->Clone(&saved)) ||
-      FAILED(range->Clone(&end)) || FAILED(end->Collapse(ec, TF_ANCHOR_END))) {
+  if (FAILED(range->Clone(&saved)) || FAILED(range->Clone(&end)) ||
+      FAILED(end->Collapse(ec, TF_ANCHOR_END))) {
+    _ForgetLastCommit();
     OutputDebugStringW(L"Weasel reopen: cannot record committed range\n");
     return;
   }
@@ -607,10 +661,55 @@ void WeaselTSF::_RememberLastCommit(TfEditCookie ec,
   // composition ends. Never reconstruct from an arbitrary current caret.
   saved->SetGravity(ec, TF_GRAVITY_FORWARD, TF_GRAVITY_BACKWARD);
   end->SetGravity(ec, TF_GRAVITY_BACKWARD, TF_GRAVITY_BACKWARD);
-  _last_commit_context = context;
-  _last_commit_range = saved;
-  _last_commit_end = end;
-  _last_commit_text = text;
+
+  // Check if this is an adjacent trailing punctuation commit that can merge
+  // with the top entry
+  if (!_commit_history.empty() && IsPunctuationText(text)) {
+    LONG comparison = 0;
+    if (SUCCEEDED(range->CompareStart(ec, _commit_history.back().end,
+                                      TF_ANCHOR_START, &comparison)) &&
+        comparison == 0) {
+      if (SUCCEEDED(_commit_history.back().range->ShiftEndToRange(
+              ec, range, TF_ANCHOR_END))) {
+        _commit_history.back().end = end;
+        _commit_history.back().text += text;
+        if (!_backspace_history.empty()) {
+          _backspace_history.back() += text;
+        }
+        _SyncLastCommitFields();
+        OutputDebugStringW(
+            L"Weasel reopen: merged trailing punctuation into commit "
+            L"history\n");
+        return;
+      }
+    }
+  }
+
+  // If there are existing entries, verify if the new commit is contiguous with
+  // the previous end
+  if (!_commit_history.empty()) {
+    LONG comparison = 0;
+    if (FAILED(range->CompareStart(ec, _commit_history.back().end,
+                                   TF_ANCHOR_START, &comparison)) ||
+        comparison != 0) {
+      // Caret moved or text inserted non-contiguously; discard old history
+      _commit_history.clear();
+      _backspace_history.clear();
+    }
+  }
+
+  if (_commit_history.size() >= kMaxCommitHistory) {
+    _commit_history.erase(_commit_history.begin());
+  }
+  _commit_history.push_back({saved, end, text});
+
+  if (_backspace_history.size() >= kMaxCommitHistory) {
+    _backspace_history.erase(_backspace_history.begin());
+  }
+  _backspace_history.push_back(text);
+
+  _SyncLastCommitFields();
+
   TF_STATUS status = {};
   const bool hasStatus = SUCCEEDED(context->GetStatus(&status));
   _ArmBackspace(context, text,
@@ -665,6 +764,9 @@ bool WeaselTSF::_ValidateLastCommit(TfEditCookie ec,
       return fail(mismatch);
     recovered->SetGravity(ec, TF_GRAVITY_FORWARD, TF_GRAVITY_BACKWARD);
     _last_commit_range = recovered;
+    if (!_commit_history.empty()) {
+      _commit_history.back().range = recovered;
+    }
   }
 
   com_ptr<ITfRange> position;
@@ -725,10 +827,10 @@ bool WeaselTSF::_DetectTransientReset(TfEditCookie ec,
       atBegin != 0 || atEnd != 0)
     return false;
   _backspace_range_lost = true;
-  _last_commit_range = nullptr;
-  _last_commit_end = nullptr;
+  _commit_history.clear();
+  _backspace_history.clear();
+  _SyncLastCommitFields();
   _last_commit_context = nullptr;
-  _last_commit_text.clear();
   OutputDebugStringW(
       L"Weasel reopen: temporary context reset, backspace eligible\n");
   return true;
@@ -758,7 +860,17 @@ bool WeaselTSF::_RequestBackspace(TfEditCookie ec,
     }
   }
   const unsigned count = static_cast<unsigned>(text.size());
-  _ForgetLastCommit();
+  if (!_commit_history.empty())
+    _commit_history.pop_back();
+  if (!_backspace_history.empty())
+    _backspace_history.pop_back();
+  _SyncLastCommitFields();
+  if (_commit_history.empty()) {
+    _last_commit_context = nullptr;
+    _InvalidateBackspace();
+    _backspace_context = nullptr;
+    _backspace_range_lost = false;
+  }
   OutputDebugStringW(L"Weasel reopen: using backspace compatibility\n");
   _RequestInputAction(context, count);
   return true;
@@ -838,7 +950,17 @@ bool WeaselTSF::_ReopenLastCommit(TfEditCookie ec,
     OutputDebugStringW(L"Weasel reopen: cannot position after deletion\n");
     return false;
   }
-  _ForgetLastCommit();
+  if (!_commit_history.empty())
+    _commit_history.pop_back();
+  if (!_backspace_history.empty())
+    _backspace_history.pop_back();
+  _SyncLastCommitFields();
+  if (_commit_history.empty()) {
+    _last_commit_context = nullptr;
+    _InvalidateBackspace();
+    _backspace_context = nullptr;
+    _backspace_range_lost = false;
+  }
   if (!_QueueReopen(context, range, expectedText)) {
     _RollbackReopen(ec, context);
     OutputDebugStringW(L"Weasel reopen: cannot queue restore session\n");

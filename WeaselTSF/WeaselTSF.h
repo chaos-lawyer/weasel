@@ -162,6 +162,14 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   void _InvalidateBackspace();
   void _RemoveReeditMouseGuard();
   void _TrackReeditKey(WPARAM key, bool keyUp);
+  struct CommitHistoryEntry {
+    com_ptr<ITfRange> range;
+    com_ptr<ITfRange> end;
+    std::wstring text;
+  };
+  static constexpr size_t kMaxCommitHistory = 10;
+  void _SyncLastCommitFields();
+
   void _RememberLastCommit(TfEditCookie ec,
                            com_ptr<ITfContext> context,
                            com_ptr<ITfRange> range,
@@ -293,11 +301,13 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   HWND _cloud_focus = nullptr;
   com_ptr<ITfContext> _cloud_context;
   com_ptr<ITfContext> _last_commit_context;
+  std::vector<CommitHistoryEntry> _commit_history;
   com_ptr<ITfRange> _last_commit_range;
   com_ptr<ITfRange> _last_commit_end;
   com_ptr<ITfRange> _reopen_range;
   std::wstring _reopen_text;
   std::wstring _last_commit_text;
+  std::vector<std::wstring> _backspace_history;
   com_ptr<ITfContext> _backspace_context;
   std::wstring _backspace_text;
   HWND _backspace_focus = nullptr;
