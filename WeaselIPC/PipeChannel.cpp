@@ -87,18 +87,20 @@ void PipeChannelBase::_FinalizePipe(HANDLE& p) {
 
 void PipeChannelBase::_Receive(HANDLE pipe, LPVOID msg, size_t rec_len) {
   DWORD lread;
+  auto ctx = _GetContext();
+  ctx->response_body_bytes = 0;
   BOOL success = ::ReadFile(pipe, msg, rec_len, &lread, NULL);
   if (!success) {
     _ThrowIfNot(ERROR_MORE_DATA);
 
-    auto ctx = _GetContext();
     memset(ctx->buffer.get(), 0, buff_size);
     success = ::ReadFile(pipe, ctx->buffer.get(), buff_size, &lread, NULL);
     if (!success) {
       _ThrowLastError;
     }
+    ctx->response_body_bytes = lread;
   }
-  _GetContext()->has_body = false;
+  ctx->has_body = false;
 }
 
 HANDLE PipeChannelBase::_ConnectServerPipe(std::wstring& pn) {

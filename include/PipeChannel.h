@@ -16,9 +16,12 @@ class PipeChannelBase {
     std::unique_ptr<char[]> buffer;
     std::unique_ptr<Stream> write_stream;
     bool has_body;
+    size_t response_body_bytes;
 
     ChannelContext(size_t bs)
-        : buffer(std::make_unique<char[]>(bs)), has_body(false) {}
+        : buffer(std::make_unique<char[]>(bs)),
+          has_body(false),
+          response_body_bytes(0) {}
   };
 
   PipeChannelBase(std::wstring&& pn_cmd, size_t bs, SECURITY_ATTRIBUTES* s);
@@ -135,6 +138,10 @@ class PipeChannel : public PipeChannelBase {
   char* SendBuffer() const { return _GetContext()->buffer.get() + _MsgSize; }
 
   char* ReceiveBuffer() const { return _GetContext()->buffer.get() + _ResSize; }
+
+  size_t ResponseBodyBytes() const {
+    return _GetContext()->response_body_bytes;
+  }
 
   template <typename _TyHandler>
   bool HandleResponseData(_TyHandler const& handler) {

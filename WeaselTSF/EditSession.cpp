@@ -14,6 +14,18 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
                                 &_cand->style());
 
   bool ok = m_client.GetResponseData(std::ref(parser));
+  {
+    wchar_t message[256];
+    swprintf_s(
+        message,
+        L"[word_commit_edit_probe] event=edit_read ok=%d "
+        L"utf16_units=%zu composition=%d status_composing=%d "
+        L"layout=%d cloud_pending=%d undo_present=%d",
+        ok ? 1 : 0, commit.size(), _IsComposing() ? 1 : 0,
+        _status.composing ? 1 : 0, static_cast<int>(_cand->style().layout_type),
+        context->cloud_pending ? 1 : 0, context->undo_action.empty() ? 0 : 1);
+    weasel::AppendWordCommitTrace(message);
+  }
   if (!ok || !commit.empty()) {
     wchar_t message[256];
     swprintf_s(message,

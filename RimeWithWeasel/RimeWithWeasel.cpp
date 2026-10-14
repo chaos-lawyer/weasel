@@ -1153,6 +1153,18 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
       _GetCandidateInfo(cinfo, ctx, session_id);
     }
     _ResolveLayoutForSession(session_status, cinfo);
+    if (word_probe) {
+      wchar_t message[256];
+      swprintf_s(message,
+                 L"[word_commit_layout_probe] ipc_id=%lu vertical_option=%d "
+                 L"configured_layout=%d resolved_layout=%d candidates=%zu",
+                 ipc_id,
+                 rime_api->get_option(session_id, "vertical_layout") ? 1 : 0,
+                 static_cast<int>(session_status.configured_layout_type),
+                 static_cast<int>(session_status.style.layout_type),
+                 static_cast<size_t>(ctx.menu.num_candidates));
+      weasel::AppendWordCommitTrace(message, false);
+    }
     if (is_composing) {
       const DisplayPreedit display_preedit =
           _GetDisplayPreedit(session_id, ctx.composition.preedit);

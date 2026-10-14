@@ -1099,13 +1099,20 @@ void WeaselTSF::_RollbackReopen(TfEditCookie ec, com_ptr<ITfContext> context) {
 }
 
 void WeaselTSF::_UpdateComposition(com_ptr<ITfContext> pContext) {
-  HRESULT hr;
+  HRESULT session_hr = E_FAIL;
 
   _pEditSessionContext = pContext;
 
-  _pEditSessionContext->RequestEditSession(
-      _tfClientId, this, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE, &hr);
-  _async_edit = !!(hr == TF_S_ASYNC);
+  const HRESULT request_hr = _pEditSessionContext->RequestEditSession(
+      _tfClientId, this, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE, &session_hr);
+  _async_edit = !!(session_hr == TF_S_ASYNC);
+  wchar_t message[224];
+  swprintf_s(message,
+             L"[word_commit_edit_probe] event=edit_request "
+             L"request_hr=0x%08lx session_hr=0x%08lx async=%d",
+             static_cast<unsigned long>(request_hr),
+             static_cast<unsigned long>(session_hr), _async_edit ? 1 : 0);
+  weasel::AppendWordCommitTrace(message);
 }
 
 /* Composition State */

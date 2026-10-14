@@ -1,8 +1,31 @@
 #include "stdafx.h"
 #include "WeaselClientImpl.h"
 #include <StringAlgorithm.hpp>
+#include <WordCommitTrace.h>
+
+#include <string_view>
 
 using namespace weasel;
+
+namespace {
+thread_local unsigned long word_request_id = 0;
+
+bool ResponseContainsCommit(PipeChannel<PipeMessage>& channel) {
+  const size_t body_bytes = channel.ResponseBodyBytes();
+  if (!body_bytes)
+    return false;
+  bool found = false;
+  ResponseHandler inspect = [&](LPWSTR buffer, DWORD length) {
+    const size_t body_units = body_bytes / sizeof(wchar_t);
+    const size_t units = body_units < length ? body_units : length;
+    const std::wstring_view response(buffer, units);
+    found = response.find(L"commit=") != std::wstring_view::npos;
+    return true;
+  };
+  channel.HandleResponseData(inspect);
+  return found;
+}
+}  // namespace
 
 ClientImpl::ClientImpl()
     : session_id(0), channel(GetPipeName()), is_ime(false) {
@@ -179,7 +202,25 @@ bool ClientImpl::GetResponseData(ResponseHandler const& handler) {
     return false;
   }
 
-  return channel.HandleResponseData(handler);
+  const bool word_probe = app_name == L"winword.exe" && !is_ime;
+  if (word_probe) {
+    wchar_t message[256];
+    swprintf_s(message,
+               L"[word_commit_ipc_probe] event=read_before req=%lu "
+               L"body_bytes=%zu commit_marker=%d",
+               word_request_id, channel.ResponseBodyBytes(),
+               ResponseContainsCommit(channel) ? 1 : 0);
+    AppendWordCommitTrace(message);
+  }
+  const bool ok = channel.HandleResponseData(handler);
+  if (word_probe) {
+    wchar_t message[192];
+    swprintf_s(message,
+               L"[word_commit_ipc_probe] event=read_after req=%lu ok=%d",
+               word_request_id, ok ? 1 : 0);
+    AppendWordCommitTrace(message);
+  }
+  return ok;
 }
 
 bool ClientImpl::_WriteClientInfo() {
@@ -193,10 +234,37 @@ bool ClientImpl::_WriteClientInfo() {
 LRESULT ClientImpl::_SendMessage(WEASEL_IPC_COMMAND Msg,
                                  DWORD wParam,
                                  DWORD lParam) {
+  const bool word_probe = app_name == L"winword.exe" && !is_ime;
+  const unsigned long request_id = word_probe ? ++word_request_id : 0;
+  if (word_probe) {
+    wchar_t message[192];
+    swprintf_s(message, L"[word_commit_ipc_probe] event=send req=%lu cmd=%u",
+               request_id, static_cast<unsigned int>(Msg));
+    AppendWordCommitTrace(message);
+  }
   try {
     PipeMessage req{Msg, wParam, lParam};
-    return channel.Transact(req);
+    const LRESULT result = channel.Transact(req);
+    if (word_probe) {
+      wchar_t message[256];
+      swprintf_s(message,
+                 L"[word_commit_ipc_probe] event=reply req=%lu cmd=%u "
+                 L"result=%lld body_bytes=%zu commit_marker=%d",
+                 request_id, static_cast<unsigned int>(Msg),
+                 static_cast<long long>(result), channel.ResponseBodyBytes(),
+                 ResponseContainsCommit(channel) ? 1 : 0);
+      AppendWordCommitTrace(message);
+    }
+    return result;
   } catch (DWORD /* ex */) {
+    if (word_probe) {
+      wchar_t message[192];
+      swprintf_s(message,
+                 L"[word_commit_ipc_probe] event=reply req=%lu cmd=%u "
+                 L"result=exception",
+                 request_id, static_cast<unsigned int>(Msg));
+      AppendWordCommitTrace(message);
+    }
     return 0;
   }
 }
