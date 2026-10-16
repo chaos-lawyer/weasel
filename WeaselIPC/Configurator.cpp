@@ -19,6 +19,10 @@ void Configurator::Store(Deserializer::KeyType const& key,
   bool bool_value = (!value.empty() && value != L"0");
   if (key[1] == L"inline_preedit") {
     m_pTarget->p_config->inline_preedit = bool_value;
+  } else if (key[1] == L"cursor_punct_jump_any_field") {
+    m_pTarget->p_config->cursor_punct_jump_any_field = bool_value;
+  } else if (key[1] == L"cursor_punct_jump_keys") {
+    m_pTarget->p_config->cursor_punct_jump_keys = value;
   } else if (key[1] == L"cursor_tab_jump") {
     m_pTarget->p_config->cursor_tab_jump = bool_value;
   }

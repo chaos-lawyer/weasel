@@ -175,7 +175,6 @@ RimeWithWeaselHandler::RimeWithWeaselHandler(UI* ui)
       m_show_notifications_time(1200),
       m_base_configured_layout_type(UIStyle::LAYOUT_VERTICAL),
       m_base_fullscreen(false),
-      m_cursor_tab_jump(false),
       _UpdateUICallback(NULL) {
   m_ui->InServer() = true;
   rime_api = rime_get_api();
@@ -199,10 +198,11 @@ RimeWithWeaselHandler::~RimeWithWeaselHandler() {
 }
 
 bool add_session = false;
-void _UpdateUIStyle(RimeConfig* config,
-                    UI* ui,
-                    bool initialize,
-                    bool* cursor_tab_jump = nullptr);
+void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize);
+static CursorJumpOverrides _ReadCursorJumpOverrides(RimeConfig* config,
+                                                    const std::string& prefix);
+static void _LoadCursorJumpAppOptions(RimeConfig* config,
+                                      CursorJumpOptionsByAppName& options);
 bool _UpdateUIStyleColor(RimeConfig* config,
                          UIStyle& style,
                          const std::string& color = std::string());
@@ -260,7 +260,11 @@ void RimeWithWeaselHandler::Initialize() {
   RimeConfig config = {NULL};
   if (rime_api->config_open("weasel", &config)) {
     if (m_ui) {
-      _UpdateUIStyle(&config, m_ui, true, &m_cursor_tab_jump);
+      _UpdateUIStyle(&config, m_ui, true);
+      m_base_cursor_jump_config = {};
+      _ReadCursorJumpOverrides(&config, "style/")
+          .ApplyTo(m_base_cursor_jump_config);
+      _LoadCursorJumpAppOptions(&config, m_cursor_jump_app_options);
       _UpdateShowNotifications(&config, true);
       m_current_dark_mode = IsUserDarkMode();
       if (m_current_dark_mode) {
@@ -346,6 +350,7 @@ DWORD RimeWithWeaselHandler::AddSession(LPWSTR buffer, EatLine eat) {
              << ", ipc_id = " << ipc_id;
   SessionStatus& session_status = new_session_status(ipc_id);
   session_status.style = m_base_style;
+  session_status.cursor_jump_config = m_base_cursor_jump_config;
   session_status.session_id = session_id;
   session_status.configured_layout_type = m_base_configured_layout_type;
   session_status.fullscreen = m_base_fullscreen;
@@ -396,7 +401,11 @@ void RimeWithWeaselHandler::UpdateColorTheme(BOOL darkMode) {
   RimeConfig config = {NULL};
   if (rime_api->config_open("weasel", &config)) {
     if (m_ui) {
-      _UpdateUIStyle(&config, m_ui, true, &m_cursor_tab_jump);
+      _UpdateUIStyle(&config, m_ui, true);
+      m_base_cursor_jump_config = {};
+      _ReadCursorJumpOverrides(&config, "style/")
+          .ApplyTo(m_base_cursor_jump_config);
+      _LoadCursorJumpAppOptions(&config, m_cursor_jump_app_options);
       m_current_dark_mode = darkMode;
       if (darkMode) {
         const int BUF_SIZE = 255;
@@ -853,6 +862,8 @@ void RimeWithWeaselHandler::_UpdateUI(WeaselSessionId ipc_id) {
 void RimeWithWeaselHandler::_LoadSchemaSpecificSettings(
     WeaselSessionId ipc_id,
     const std::string& schema_id) {
+  SessionStatus& session_status = get_session_status(ipc_id);
+  session_status.cursor_jump_config = m_base_cursor_jump_config;
   if (!m_ui)
     return;
   RimeConfig config;
@@ -873,8 +884,9 @@ void RimeWithWeaselHandler::_LoadSchemaSpecificSettings(
   }();
   _UpdateShowNotifications(&config);
   m_ui->style() = m_base_style;
-  _UpdateUIStyle(&config, m_ui, false, &m_cursor_tab_jump);
-  SessionStatus& session_status = get_session_status(ipc_id);
+  _UpdateUIStyle(&config, m_ui, false);
+  _ReadCursorJumpOverrides(&config, "style/")
+      .ApplyTo(session_status.cursor_jump_config);
   session_status.style = m_ui->style();
   UIStyle& style = session_status.style;
   session_status.configured_layout_type = weasel::ResolveConfiguredLayoutType(
@@ -1307,9 +1319,20 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
   body.append(L"config.inline_preedit=")
       .append(std::to_wstring((int)session_status.style.inline_preedit))
       .append(L"\n");
+  auto cursor_config = session_status.cursor_jump_config;
+  const auto cursor_app = m_cursor_jump_app_options.find(client_app);
+  if (cursor_app != m_cursor_jump_app_options.end())
+    cursor_app->second.ApplyTo(cursor_config);
   body.append(L"config.cursor_tab_jump=")
-      .append(std::to_wstring((int)m_cursor_tab_jump))
+      .append(std::to_wstring((int)cursor_config.enabled))
       .append(L"\n");
+
+  body.append(L"config.cursor_punct_jump_keys=")
+      .append(escape_string(cursor_config.punct_keys))
+      .append(L"\n");
+
+  body.append(L"config.cursor_punct_jump_any_field=")
+      .append(cursor_config.punct_any_field ? L"1\n" : L"0\n");
 
   // style
   if (!session_status.__synced) {
@@ -1821,10 +1844,7 @@ void RimeWithWeaselHandler::_RemapCandidateNavigationKey(
 }
 
 // update ui's style parameters, ui has been check before referenced
-static void _UpdateUIStyle(RimeConfig* config,
-                           UI* ui,
-                           bool initialize,
-                           bool* cursor_tab_jump) {
+static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
   UIStyle& style(ui->style());
   const std::function<void(std::wstring&)> rmspace = [](std::wstring& str) {
     str = std::regex_replace(str, std::wregex(L"\\s*(,|:|^|$)\\s*"), L"$1");
@@ -1854,8 +1874,6 @@ static void _UpdateUIStyle(RimeConfig* config,
                  style.candidate_abbreviate_length, 0, 0, _abs);
   _RimeGetBool(config, "style/inline_preedit", initialize,
                style.inline_preedit);
-  if (cursor_tab_jump)
-    _RimeGetBool(config, "style/cursor_tab_jump", initialize, *cursor_tab_jump);
   _RimeGetBool(config, "style/vertical_auto_reverse", initialize,
                style.vertical_auto_reverse);
   static constexpr Array<UIStyle::PreeditType, 3> _preeditArr = {
@@ -2173,6 +2191,37 @@ static void _LoadReeditMethods(RimeConfig* config,
   });
 }
 
+static CursorJumpOverrides _ReadCursorJumpOverrides(RimeConfig* config,
+                                                    const std::string& prefix) {
+  CursorJumpOverrides overrides;
+  Bool enabled = False;
+  if (rime_api->config_get_bool(config, (prefix + "cursor_tab_jump").c_str(),
+                                &enabled))
+    overrides.enabled = !!enabled;
+  char keys[256] = {};
+  if (rime_api->config_get_string(config,
+                                  (prefix + "cursor_punct_jump_keys").c_str(),
+                                  keys, sizeof(keys)))
+    overrides.punct_keys = FilterCursorPunctKeys(u8tow(keys));
+  char scope[32] = {};
+  if (rime_api->config_get_string(config,
+                                  (prefix + "cursor_punct_jump_scope").c_str(),
+                                  scope, sizeof(scope))) {
+    const std::string value(scope);
+    if (value == "last" || value == "any")
+      overrides.punct_any_field = value == "any";
+  }
+  return overrides;
+}
+
+static void _LoadCursorJumpAppOptions(RimeConfig* config,
+                                      CursorJumpOptionsByAppName& options) {
+  options.clear();
+  ForEachRimeMap(config, "app_options", [&](const char* app, const char* path) {
+    options[app] = _ReadCursorJumpOverrides(config, std::string(path) + "/");
+  });
+}
+
 static void _LoadAppOptions(RimeConfig* config,
                             AppOptionsByAppName& app_options) {
   app_options.clear();
@@ -2181,7 +2230,10 @@ static void _LoadAppOptions(RimeConfig* config,
         AppOptions& options(app_options[app_key]);
         ForEachRimeMap(
             config, app_path, [&](const char* opt_key, const char* opt_path) {
-              if (std::string(opt_key) == "h_reedit_method")
+              const std::string name(opt_key);
+              if (name == "h_reedit_method" || name == "cursor_tab_jump" ||
+                  name == "cursor_punct_jump_keys" ||
+                  name == "cursor_punct_jump_scope")
                 return;
               Bool value = False;
               if (rime_api->config_get_bool(config, opt_path, &value)) {

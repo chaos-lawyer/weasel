@@ -114,6 +114,31 @@ void test_cloud_pending() {
   BOOST_TEST(!ctx.cloud_pending);
 }
 
+void test_cursor_punctuation_config() {
+  WCHAR enabled[] =
+      L"action=config\n"
+      L"config.cursor_tab_jump=1\n"
+      L"config.cursor_punct_jump_keys=,.;:!?\n"
+      L"config.cursor_punct_jump_any_field=1\n";
+  WCHAR disabled[] =
+      L"action=config\n"
+      L"config.cursor_punct_jump_keys=\n"
+      L"config.cursor_punct_jump_any_field=0\n";
+  weasel::Context ctx;
+  weasel::Config config;
+  weasel::ResponseParser parser(nullptr, &ctx, nullptr, &config);
+  parser(enabled, wcslen(enabled));
+  BOOST_TEST(config.cursor_tab_jump);
+  BOOST_TEST(config.cursor_punct_jump_any_field);
+  BOOST_TEST(config.cursor_punct_jump_keys == L",.;:!?");
+  parser(disabled, wcslen(disabled));
+  BOOST_TEST(!config.cursor_punct_jump_any_field);
+  BOOST_TEST(config.cursor_punct_jump_keys.empty());
+  config.cursor_punct_jump_keys = L",";
+  config.reset();
+  BOOST_TEST(config.cursor_punct_jump_keys.empty());
+}
+
 int _tmain(int argc, _TCHAR* argv[]) {
   test_1();
   test_2();
@@ -121,6 +146,7 @@ int _tmain(int argc, _TCHAR* argv[]) {
   test_4();
   test_5();
   test_cloud_pending();
+  test_cursor_punctuation_config();
 
   system("pause");
   return boost::report_errors();

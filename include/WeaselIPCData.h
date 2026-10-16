@@ -207,13 +207,20 @@ struct Status {
 
 // 用於向前端告知設置信息
 struct Config {
-  Config() : inline_preedit(false), cursor_tab_jump(false) {}
+  Config()
+      : inline_preedit(false),
+        cursor_tab_jump(false),
+        cursor_punct_jump_any_field(false) {}
   void reset() {
     inline_preedit = false;
     cursor_tab_jump = false;
+    cursor_punct_jump_keys.clear();
+    cursor_punct_jump_any_field = false;
   }
   bool inline_preedit;
   bool cursor_tab_jump;
+  std::wstring cursor_punct_jump_keys;
+  bool cursor_punct_jump_any_field;
 };
 
 struct UIStyle {

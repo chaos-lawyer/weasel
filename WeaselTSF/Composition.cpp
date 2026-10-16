@@ -596,8 +596,9 @@ bool WeaselTSF::_SendCursorKeys(WORD direction,
       selectionLength > 64 || (direction != VK_LEFT && direction != VK_RIGHT))
     return false;
   // Do not inherit the key used to select the candidate as a modifier.
+  const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
   if ((GetKeyState(VK_CONTROL) & 0x8000) || (GetKeyState(VK_MENU) & 0x8000) ||
-      (GetKeyState(VK_SHIFT) & 0x8000))
+      (shift && !_punct_jump_context))
     return false;
   std::vector<INPUT> inputs;
   auto key = [&](WORD vk, DWORD flags) {
@@ -614,6 +615,10 @@ bool WeaselTSF::_SendCursorKeys(WORD direction,
     key(vk, 0);
     key(vk, KEYEVENTF_KEYUP);
   };
+  // Shifted punctuation retains its captured Rime mask; navigation itself
+  // must not extend the document selection.
+  if (shift)
+    key(VK_SHIFT, KEYEVENTF_KEYUP);
   if (collapseSelection)
     press(VK_RIGHT);
   for (LONG i = 0; i < steps; ++i)
@@ -624,6 +629,8 @@ bool WeaselTSF::_SendCursorKeys(WORD direction,
       press(VK_RIGHT);
     key(VK_SHIFT, KEYEVENTF_KEYUP);
   }
+  if (shift)
+    key(VK_SHIFT, 0);
   // Drain even if TSF drops dwExtraInfo on the simulated navigation events.
   press(VK_F23);
   _cursor_input_active = true;
@@ -720,7 +727,7 @@ void WeaselTSF::_InitTabJumpSession(com_ptr<ITfContext> context,
   _tab_jump_focus = GetFocus();
 }
 
-bool WeaselTSF::_StepTabJump(ITfContext* pContext, bool backward) {
+bool WeaselTSF::_StepTabJump(ITfContext* pContext, bool backward, bool toEnd) {
   if (!_HasActiveTabJumpSession())
     return false;
   if (pContext != _tab_jump_context || _tab_jump_focus != GetFocus()) {
@@ -760,11 +767,21 @@ bool WeaselTSF::_StepTabJump(ITfContext* pContext, bool backward) {
       _ClearTabJumpSession();
       return false;
     }
-    const size_t target_index = _tab_jump_index + 1;
+    const size_t target_index =
+        toEnd ? _tab_jump_targets.size() - 1 : _tab_jump_index + 1;
     const auto target = _tab_jump_targets[target_index];
     bool ok = false;
     if (_tab_jump_keyboard) {
-      const LONG movement = target.steps + _tab_jump_caret_offset;
+      LONG movement = _tab_jump_caret_offset;
+      for (size_t i = _tab_jump_index + 1; i <= target_index; ++i) {
+        movement += _tab_jump_targets[i].steps;
+        if (i < target_index)
+          movement += _tab_jump_targets[i].selection_length;
+        if (movement > 4096 || movement < -4096) {
+          _ClearTabJumpSession();
+          return false;
+        }
+      }
       ok = _SendCursorKeys(movement < 0 ? VK_LEFT : VK_RIGHT,
                            movement < 0 ? -movement : movement,
                            target.selection_length, _tab_jump_selection);

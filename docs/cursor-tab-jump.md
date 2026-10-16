@@ -14,12 +14,49 @@
 
 Chromium 的提交路径会以 `kMoveCursorAfterText` 插入文本，且将上下文标记为 `TS_SS_TRANSITORY`，因此提交前设置选区、长期保存范围不能作为跨应用定位的共同前提。参考 [Chromium TSFTextStore 实现](https://github.com/chromium/chromium/blob/main/ui/base/ime/win/tsf_text_store.cc)。
 
+## 标点按键白名单
+
+在 `Rime/weasel.custom.yaml` 的已有 `patch:` 下配置：
+
+```yaml
+patch:
+  "style/cursor_tab_jump": true
+  "style/cursor_punct_jump_keys": ",.;:!?"
+  "style/cursor_punct_jump_scope": last
+```
+
+白名单填写实际按键产生的半角字符：`,` 对应逗号键，`.` 对应句号键，`:` 对应 Shift+分号，`?` 对应 Shift+/，`!` 对应 Shift+1。最终输入中文还是英文标点，仍由 Rime 当前设置决定。删除字符即可缩小白名单，空字符串 `""` 关闭自动跳末尾。未配置时默认关闭；本项目用户配置已写入上述白名单。修改后重新部署配置。
+
+仅在跳转会话有效且输入文字已上屏时触发。默认范围 `last` 只允许在最后一个填空触发；`any` 允许在任意字段触发，并直接跳到整个模板末尾。例如 `（以下简称“xxx|”）` 按逗号后成为 `（以下简称“xxx”），|`。`last` 避免跳过未填字段；`any` 会跳过后续字段，尚未替换的字段提示文字仍保留在模板中。Tab 和 Shift+Tab 的逐项跳转行为不受该范围设置影响。
+
+白名单外的标点按键仍在填空内输入。字母编码、候选词、宏及其他文本提交产生的标点，不经过按键判断，不会触发跳末尾；白名单不能填写中文标点 `，。` 或字母编码。Ctrl/Alt/Win 组合键不触发，拼音候选状态下的标点键也继续交给原方案处理。
+
+兼容模式等待方向键定位完成后才把保存的标点按键交给 Rime。若 Rime 透传标点（例如 ASCII 模式），则在末尾发送原半角字符。原按键的释放事件会被消费，防止重复输入。
+
+## 按应用覆盖
+
+可在已有 `patch:` 下按应用进程名覆盖单个选项，例如：
+
+```yaml
+patch:
+  "app_options/chrome.exe/cursor_punct_jump_keys": ",."
+  "app_options/wechat.exe/cursor_punct_jump_scope": any
+  "app_options/emeditor.exe/cursor_tab_jump": false
+```
+
+以上仅为用法示例，不会默认禁用这些应用。优先级为全局 `style/` → 方案 `style/` → `app_options/<进程名>/`。应用名不区分大小写；未填写的选项继承前一层，显式 `false` 和空字符串 `""` 会覆盖前一层。错误的范围值会被忽略并继承前一层。
+
+`cursor_tab_jump: false` 关闭该应用的 Tab 跳转会话及标点自动跳末尾，保留模板首次上屏的定位行为，与原总开关含义一致。只想关闭标点自动跳末尾而保留 Tab 时，设置该应用的 `cursor_punct_jump_keys: ""`。光标策略按会话保存，应用覆盖在每次响应时单独计算，不会修改其他窗口或方案的基础设置；这些前端选项不会作为 Rime 引擎开关传入。
+
+修改 YAML 后重新部署即可调整规则；首次使用这些新增配置仍需安装包含本次接口改动的 Windows 主程序。
+
 ## 本地回归
 
 在项目根目录运行：
 
 ```sh
 python3 tests/test_cursor_tab_jump.py
+python3 tests/test_cursor_punct_config.py
 python3 tests/test_frontend_reopen.py
 python3 tests/test_frontend_undo.py
 ```
@@ -38,6 +75,10 @@ python3 tests/test_frontend_undo.py
 | 同上 | 输入拼音时按 PageUp/PageDown 翻页，或用方向键移动拼音光标、选择候选；选词上屏后 Tab 仍跳到下一项。 |
 | 同上 | 字段文字上屏后，按左右键在当前字段内移动，继续输入或 Delete 删除字段内后续字符；Tab 仍跳到下一项，最后一项跳到末尾。 |
 | 同上 | 填空过程中按 Esc、用鼠标重新定位或切换窗口后，Tab 恢复应用原有行为。 |
+| `csdw=1,（以下简称“$|”）` | 上屏“测试公司”后按逗号，结果为 `（以下简称“测试公司”），`；Shift+/ 在末尾输入问号。 |
+| 同上 | 使用未加入白名单的标点键，或通过字母编码选择标点候选；标点仍插入当前填空内。 |
+| 多字段词条 | `last` 下非最后字段输入白名单标点仍留在字段内；`any` 下从第一字段也能直接跳到整个模板末尾输入标点。 |
+| 应用配置 | 在两个应用间切换并使用不同白名单/开关；未设置覆盖的应用仍继承全局值，应用覆盖不应影响其他窗口。 |
 | 普通无占位符词条 | 正常上屏到末尾，Tab 保持原有行为。 |
 
 方向键兼容方式按模板中未改动的后缀计算距离，合并 UTF-16 代理对和 CRLF；组合附加符、ZWJ 表情序列、双向文本以及会自动改写模板后缀的编辑器插件，仍需单独实测。一次移动超过 4096 步、按住 Ctrl/Alt/Shift 选择模板、系统拒绝注入时会停止跳转。当前未在上述 Windows 应用中验证。

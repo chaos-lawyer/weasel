@@ -24,6 +24,7 @@ stub = r'''
 #include <vector>
 #define STDMETHODIMP int
 using BOOL = int;
+using UINT = unsigned int;
 using WPARAM = std::uintptr_t;
 using LPARAM = std::intptr_t;
 constexpr BOOL TRUE = 1, FALSE = 0;
@@ -53,6 +54,9 @@ struct WeaselTSF {
   void _TrackTabJumpNavigation(WPARAM) {}
   bool _IsComposing() const { return false; }
   bool _tab_jump_keyup = false;
+  WPARAM _punct_jump_release = 0;
+  bool _MatchPunctuationJump(WPARAM, LPARAM, UINT*, UINT*) { return false; }
+  bool _BeginPunctuationJump(ITfContext*, WPARAM, UINT, UINT) { return false; }
   int OnTestKeyDown(ITfContext*, WPARAM, LPARAM, BOOL*);
   int OnKeyDown(ITfContext*, WPARAM, LPARAM, BOOL*);
   int OnTestKeyUp(ITfContext*, WPARAM, LPARAM, BOOL*);

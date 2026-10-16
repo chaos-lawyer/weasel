@@ -41,7 +41,11 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
 
   bool compositionEnded = false;
   if (ok) {
+    if (_cursor_tab_jump && !config.cursor_tab_jump)
+      _ClearTabJumpSession();
     _cursor_tab_jump = config.cursor_tab_jump;
+    _cursor_punct_jump_keys = config.cursor_punct_jump_keys;
+    _cursor_punct_jump_any_field = config.cursor_punct_jump_any_field;
     compositionEnded = false;
     std::wstring reopenPrefix = L"reopen_last_commit:";
     const bool automatic =

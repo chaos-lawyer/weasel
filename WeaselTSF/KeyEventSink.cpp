@@ -138,13 +138,109 @@ bool WeaselTSF::_HandleCursorInput(WPARAM key,
                                    BOOL* eaten) {
   const bool tagged =
       static_cast<ULONG_PTR>(GetMessageExtraInfo()) == kCursorInputMarker;
-  if (!tagged && !(_cursor_input_active && (key == VK_LEFT || key == VK_RIGHT ||
-                                            key == VK_SHIFT || key == VK_F23)))
+  if (!tagged && !(_cursor_input_active &&
+                   (key == VK_LEFT || key == VK_RIGHT || key == VK_SHIFT ||
+                    key == VK_PACKET || key == VK_F23)))
     return false;
   *eaten = key == VK_F23;
-  if (key == VK_F23 && release && !test)
+  if (key == VK_F23 && release && !test) {
     _cursor_input_active = false;
+    _FinishPunctuationJump();
+  }
   return true;
+}
+
+bool WeaselTSF::_MatchPunctuationJump(WPARAM key,
+                                      LPARAM lParam,
+                                      UINT* code,
+                                      UINT* mask) {
+  // Match physical punctuation keys only, never committed text or letters
+  // translated by a schema into punctuation. A snippet has N fields + end.
+  if (!_cursor_tab_jump || _cursor_punct_jump_keys.empty() ||
+      !_HasActiveTabJumpSession() || _IsComposing() || _cursor_input_active ||
+      (!_cursor_punct_jump_any_field &&
+       _tab_jump_index + 2 != _tab_jump_targets.size()) ||
+      (key >= 'A' && key <= 'Z') || key == VK_PACKET ||
+      ((_isToOpenClose && !_IsKeyboardOpen()) || _IsKeyboardDisabled()) ||
+      (GetKeyState(VK_CONTROL) & 0x8000) || (GetKeyState(VK_MENU) & 0x8000) ||
+      (GetKeyState(VK_LWIN) & 0x8000) || (GetKeyState(VK_RWIN) & 0x8000))
+    return false;
+  BYTE state[256] = {};
+  GetKeyboardState(state);
+  weasel::KeyEvent event;
+  if (!ConvertKeyEvent(static_cast<UINT>(key), lParam, state, event))
+    return false;
+  const UINT c = event.keycode;
+  const bool punctuation = (c >= '!' && c <= '/') || (c >= ':' && c <= '@') ||
+                           (c >= '[' && c <= '`') || (c >= '{' && c <= '~');
+  if (!punctuation || _cursor_punct_jump_keys.find(static_cast<wchar_t>(c)) ==
+                          std::wstring::npos)
+    return false;
+  *code = c;
+  *mask = event.mask;
+  return true;
+}
+
+bool WeaselTSF::_BeginPunctuationJump(ITfContext* context,
+                                      WPARAM key,
+                                      UINT code,
+                                      UINT mask) {
+  if (context != _tab_jump_context || _tab_jump_focus != GetFocus())
+    return false;
+  const bool keyboard = _tab_jump_keyboard;
+  _punct_jump_context = context;
+  _punct_jump_focus = GetFocus();
+  _punct_jump_code = code;
+  _punct_jump_mask = mask;
+  _punct_jump_release = key;
+  if (!_StepTabJump(context, false, true)) {
+    _punct_jump_context = nullptr;
+    _punct_jump_release = 0;
+    return false;
+  }
+  if (!keyboard)
+    _FinishPunctuationJump();
+  return true;
+}
+
+void WeaselTSF::_FinishPunctuationJump() {
+  if (!_punct_jump_context)
+    return;
+  const auto context = _punct_jump_context;
+  const HWND focus = _punct_jump_focus;
+  const UINT code = _punct_jump_code;
+  const UINT mask = _punct_jump_mask;
+  _punct_jump_context = nullptr;
+  if (focus != GetFocus() || (_isToOpenClose && !_IsKeyboardOpen()) ||
+      _IsKeyboardDisabled())
+    return;
+  // In fallback hosts the cursor keys must reach the editor before Rime can
+  // commit punctuation. F23's release is the end-of-navigation barrier.
+  const bool handled = m_client.ProcessKeyEvent(weasel::KeyEvent(code, mask));
+  _UpdateComposition(context);
+  if (!handled) {
+    // ASCII mode and pass-through schemas still receive the original symbol.
+    INPUT inputs[4] = {};
+    for (size_t i = 0; i < 2; ++i) {
+      auto& input = inputs[i];
+      input.type = INPUT_KEYBOARD;
+      input.ki.wScan = static_cast<WORD>(code);
+      input.ki.dwFlags = KEYEVENTF_UNICODE;
+      input.ki.dwExtraInfo = kCursorInputMarker;
+    }
+    inputs[1].ki.dwFlags |= KEYEVENTF_KEYUP;
+    for (size_t i = 2; i < 4; ++i) {
+      inputs[i].type = INPUT_KEYBOARD;
+      inputs[i].ki.wVk = VK_F23;
+      inputs[i].ki.dwExtraInfo = kCursorInputMarker;
+    }
+    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+    _cursor_input_active = true;
+    if (SendInput(4, inputs, sizeof(INPUT)) != 4)
+      _cursor_input_active = false;
+  }
+  m_client.ProcessKeyEvent(weasel::KeyEvent(code, mask | ibus::RELEASE_MASK));
+  _UpdateComposition(context);
 }
 
 void WeaselTSF::_TrackTabJumpKey(ITfContext* context, WPARAM key) {
@@ -203,6 +299,8 @@ STDMETHODIMP WeaselTSF::OnSetFocus(BOOL fForeground) {
     m_client.FocusIn();
   else {
     _ClearTabJumpSession();
+    _punct_jump_context = nullptr;
+    _punct_jump_release = 0;
     m_client.FocusOut();
     _AbortComposition();
   }
@@ -226,10 +324,15 @@ STDMETHODIMP WeaselTSF::OnTestKeyDown(ITfContext* pContext,
                                       BOOL* pfEaten) {
   if (_HandleCursorInput(wParam, false, true, pfEaten))
     return S_OK;
-  _TrackTabJumpKey(pContext, wParam);
   _fTestKeyUpPending = FALSE;
   if (_fTestKeyDownPending) {
     *pfEaten = TRUE;
+    return S_OK;
+  }
+  UINT punctCode = 0, punctMask = 0;
+  if (_MatchPunctuationJump(wParam, lParam, &punctCode, &punctMask)) {
+    *pfEaten = TRUE;
+    _fTestKeyDownPending = TRUE;
     return S_OK;
   }
   if (_HasActiveTabJumpSession() && !_IsComposing() && wParam == VK_TAB &&
@@ -238,6 +341,7 @@ STDMETHODIMP WeaselTSF::OnTestKeyDown(ITfContext* pContext,
     _fTestKeyDownPending = TRUE;
     return S_OK;
   }
+  _TrackTabJumpKey(pContext, wParam);
   if (_ProcessKeyEvent(pContext, wParam, lParam, pfEaten))
     _UpdateComposition(pContext);
   if (*pfEaten)
@@ -251,6 +355,14 @@ STDMETHODIMP WeaselTSF::OnKeyDown(ITfContext* pContext,
                                   BOOL* pfEaten) {
   if (_HandleCursorInput(wParam, false, false, pfEaten))
     return S_OK;
+  UINT punctCode = 0, punctMask = 0;
+  if (_MatchPunctuationJump(wParam, lParam, &punctCode, &punctMask)) {
+    _fTestKeyDownPending = FALSE;
+    if (_BeginPunctuationJump(pContext, wParam, punctCode, punctMask)) {
+      *pfEaten = TRUE;
+      return S_OK;
+    }
+  }
   _TrackTabJumpKey(pContext, wParam);
   _fTestKeyUpPending = FALSE;
   if (_HasActiveTabJumpSession() && !_IsComposing() && wParam == VK_TAB &&
@@ -280,6 +392,10 @@ STDMETHODIMP WeaselTSF::OnTestKeyUp(ITfContext* pContext,
                                     BOOL* pfEaten) {
   if (_HandleCursorInput(wParam, true, true, pfEaten))
     return S_OK;
+  if (_punct_jump_release && wParam == _punct_jump_release) {
+    *pfEaten = TRUE;
+    return S_OK;
+  }
   if (wParam == VK_TAB && _tab_jump_keyup) {
     *pfEaten = TRUE;
     return S_OK;
@@ -302,6 +418,11 @@ STDMETHODIMP WeaselTSF::OnKeyUp(ITfContext* pContext,
                                 BOOL* pfEaten) {
   if (_HandleCursorInput(wParam, true, false, pfEaten))
     return S_OK;
+  if (_punct_jump_release && wParam == _punct_jump_release) {
+    _punct_jump_release = 0;
+    *pfEaten = TRUE;
+    return S_OK;
+  }
   if (wParam == VK_TAB && _tab_jump_keyup) {
     _tab_jump_keyup = false;
     *pfEaten = TRUE;

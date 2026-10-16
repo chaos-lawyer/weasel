@@ -9,6 +9,7 @@
 #include <DynamicCandidateSelectKeys.h>
 #include <rime_api.h>
 #include <CloudCandidate.h>
+#include <CursorJumpConfig.h>
 
 struct CaseInsensitiveCompare {
   bool operator()(const std::string& str1, const std::string& str2) const {
@@ -27,6 +28,9 @@ typedef std::map<std::string, AppOptions, CaseInsensitiveCompare>
 typedef std::map<std::string, std::string, CaseInsensitiveCompare>
     ReeditMethodsByAppName;
 
+using CursorJumpOptionsByAppName =
+    std::map<std::string, weasel::CursorJumpOverrides, CaseInsensitiveCompare>;
+
 struct SessionStatus {
   SessionStatus()
       : style(weasel::UIStyle()),
@@ -37,6 +41,7 @@ struct SessionStatus {
     RIME_STRUCT(RimeStatus, status);
   }
   weasel::UIStyle style;
+  weasel::CursorJumpConfig cursor_jump_config;
   weasel::UIStyle::LayoutType configured_layout_type;
   bool fullscreen;
   weasel::DynamicLayoutConfig dynamic_layout_config;
@@ -132,7 +137,8 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   weasel::DynamicLayoutConfig m_base_dynamic_layout;
   weasel::UIStyle::LayoutType m_base_configured_layout_type;
   bool m_base_fullscreen;
-  bool m_cursor_tab_jump;
+  weasel::CursorJumpConfig m_base_cursor_jump_config;
+  CursorJumpOptionsByAppName m_cursor_jump_app_options;
   std::map<std::string, bool> m_show_notifications;
   std::map<std::string, bool> m_show_notifications_base;
   std::function<void()> _UpdateUICallback;

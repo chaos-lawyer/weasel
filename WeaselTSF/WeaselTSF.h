@@ -185,6 +185,12 @@ class WeaselTSF : public ITfTextInputProcessorEx,
                        LONG steps,
                        LONG selectionLength,
                        bool collapseSelection = false);
+  bool _MatchPunctuationJump(WPARAM key, LPARAM lParam, UINT* code, UINT* mask);
+  bool _BeginPunctuationJump(ITfContext* context,
+                             WPARAM key,
+                             UINT code,
+                             UINT mask);
+  void _FinishPunctuationJump();
   void _TrackTabJumpKey(ITfContext* context, WPARAM key);
   void _TrackTabJumpNavigation(WPARAM key);
   void _CompleteCursorPlacement(TfEditCookie ec,
@@ -192,7 +198,9 @@ class WeaselTSF : public ITfTextInputProcessorEx,
                                 bool clear);
   void _ClearTabJumpSession();
   bool _HasActiveTabJumpSession() const;
-  bool _StepTabJump(ITfContext* pContext, bool backward = false);
+  bool _StepTabJump(ITfContext* pContext,
+                    bool backward = false,
+                    bool toEnd = false);
   void _InitTabJumpSession(com_ptr<ITfContext> context,
                            std::vector<TabJumpTarget>&& targets);
 
@@ -353,6 +361,13 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   HWND _undo_focus = nullptr;
   com_ptr<ITfContext> _undo_context;
   bool _cursor_tab_jump = false;
+  std::wstring _cursor_punct_jump_keys;
+  bool _cursor_punct_jump_any_field = false;
+  com_ptr<ITfContext> _punct_jump_context;
+  HWND _punct_jump_focus = nullptr;
+  UINT _punct_jump_code = 0;
+  UINT _punct_jump_mask = 0;
+  WPARAM _punct_jump_release = 0;
   com_ptr<ITfContext> _tab_jump_context;
   std::vector<TabJumpTarget> _tab_jump_targets;
   size_t _tab_jump_index = 0;
