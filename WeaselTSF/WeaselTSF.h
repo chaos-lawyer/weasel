@@ -185,7 +185,16 @@ class WeaselTSF : public ITfTextInputProcessorEx,
                        LONG steps,
                        LONG selectionLength,
                        bool collapseSelection = false);
-  bool _MatchPunctuationJump(WPARAM key, LPARAM lParam, UINT* code, UINT* mask);
+  bool _MatchPunctuationJump(WPARAM key,
+                             LPARAM lParam,
+                             UINT* code,
+                             UINT* mask,
+                             bool allowComposing = false);
+  bool _PreparePunctuationCommit(ITfContext* context,
+                                 WPARAM key,
+                                 LPARAM lParam);
+  void _AcceptPunctuationCommit(bool accepted);
+  void _CompletePunctuationCommit(ITfContext* context, bool committed);
   bool _BeginPunctuationJump(ITfContext* context,
                              WPARAM key,
                              UINT code,
@@ -370,6 +379,11 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   UINT _punct_jump_mask = 0;
   WPARAM _punct_jump_release = 0;
   UINT _punct_jump_serial = 0;
+  UINT _punct_jump_queued_serial = 0;
+  WPARAM _punct_jump_physical = 0;
+  bool _punct_jump_waiting_reply = false;
+  bool _punct_jump_waiting_commit = false;
+  bool _punct_jump_commit_written = false;
   enum class SnippetKeyAction { None, Tab, Punctuation };
   SnippetKeyAction _snippet_test_action = SnippetKeyAction::None;
   com_ptr<ITfContext> _tab_jump_context;

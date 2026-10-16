@@ -103,8 +103,11 @@ bool WeaselTSF::_ProcessKeyEvent(ITfContext* pContext,
       else if (ke.keycode == ibus::Down)
         ke.keycode = ibus::Up;
     }
-    if (!keyCountToSimulate)
+    if (!keyCountToSimulate) {
+      if (!keyUp && _PreparePunctuationCommit(pContext, wParam, lParam))
+        ke.mask |= weasel::kSnippetPunctCommitMask;
       *pfEaten = (BOOL)m_client.ProcessKeyEvent(ke);
+    }
 
     if (ke.keycode == ibus::Caps_Lock) {
       if (prevKeyEvent.keycode == ibus::Caps_Lock && prevfEaten == TRUE &&
@@ -153,11 +156,13 @@ bool WeaselTSF::_HandleCursorInput(WPARAM key,
 bool WeaselTSF::_MatchPunctuationJump(WPARAM key,
                                       LPARAM lParam,
                                       UINT* code,
-                                      UINT* mask) {
+                                      UINT* mask,
+                                      bool allowComposing) {
   // Match physical punctuation keys only, never committed text or letters
   // translated by a schema into punctuation. A snippet has N fields + end.
   if (!_cursor_tab_jump || _cursor_punct_jump_keys.empty() ||
-      !_HasActiveTabJumpSession() || _IsComposing() || _cursor_input_active ||
+      !_HasActiveTabJumpSession() || (_IsComposing() && !allowComposing) ||
+      _cursor_input_active ||
       (!_cursor_punct_jump_any_field &&
        _tab_jump_index + 2 != _tab_jump_targets.size()) ||
       (key >= 'A' && key <= 'Z') || key == VK_PACKET ||
@@ -179,6 +184,51 @@ bool WeaselTSF::_MatchPunctuationJump(WPARAM key,
   *code = c;
   *mask = event.mask;
   return true;
+}
+
+bool WeaselTSF::_PreparePunctuationCommit(ITfContext* context,
+                                          WPARAM key,
+                                          LPARAM lParam) {
+  if (!_IsComposing() || _punct_jump_context || context != _tab_jump_context ||
+      _tab_jump_focus != GetFocus())
+    return false;
+  UINT code = 0, mask = 0;
+  if (!_MatchPunctuationJump(key, lParam, &code, &mask, true))
+    return false;
+  _punct_jump_context = context;
+  _punct_jump_focus = GetFocus();
+  _punct_jump_code = code;
+  _punct_jump_mask = mask;
+  _punct_jump_physical = key;
+  _punct_jump_waiting_reply = true;
+  _punct_jump_waiting_commit = false;
+  _punct_jump_commit_written = false;
+  ++_punct_jump_serial;
+  return true;
+}
+
+void WeaselTSF::_AcceptPunctuationCommit(bool accepted) {
+  if (!_punct_jump_waiting_reply)
+    return;
+  _punct_jump_waiting_reply = false;
+  _punct_jump_waiting_commit = accepted;
+  if (accepted)
+    _punct_jump_release = _punct_jump_physical;
+  else
+    _punct_jump_context = nullptr;
+}
+
+void WeaselTSF::_CompletePunctuationCommit(ITfContext* context,
+                                           bool committed) {
+  if (!_punct_jump_waiting_commit || context != _punct_jump_context)
+    return;
+  if (!committed || !_punct_jump_commit_written) {
+    _punct_jump_context = nullptr;
+    _punct_jump_waiting_commit = false;
+    return;
+  }
+  // The selected text must be published by the editor before we move away.
+  _QueuePunctuationJump();
 }
 
 bool WeaselTSF::_BeginPunctuationJump(ITfContext* context,
@@ -209,14 +259,29 @@ bool WeaselTSF::_BeginPunctuationJump(ITfContext* context,
 void WeaselTSF::_FinishPunctuationJump(UINT serial) {
   if (serial != _punct_jump_serial || !_punct_jump_context)
     return;
+  _punct_jump_queued_serial = 0;
   const auto context = _punct_jump_context;
   const HWND focus = _punct_jump_focus;
   const UINT code = _punct_jump_code;
   const UINT mask = _punct_jump_mask;
-  _punct_jump_context = nullptr;
   if (focus != GetFocus() || _IsComposing() ||
-      (_isToOpenClose && !_IsKeyboardOpen()) || _IsKeyboardDisabled())
+      (_isToOpenClose && !_IsKeyboardOpen()) || _IsKeyboardDisabled()) {
+    _punct_jump_context = nullptr;
+    _punct_jump_waiting_commit = false;
     return;
+  }
+  if (_punct_jump_waiting_commit) {
+    _punct_jump_waiting_commit = false;
+    const bool keyboard = _tab_jump_keyboard;
+    if (!_StepTabJump(context, false, true)) {
+      _punct_jump_context = nullptr;
+      return;
+    }
+    if (!keyboard)
+      _QueuePunctuationJump();
+    return;
+  }
+  _punct_jump_context = nullptr;
   // Run outside the TSF key callbacks. Both native SetSelection and fallback
   // key delivery may publish their actual editor selection only on return.
   const bool handled = m_client.ProcessKeyEvent(weasel::KeyEvent(code, mask));
@@ -303,6 +368,8 @@ STDMETHODIMP WeaselTSF::OnSetFocus(BOOL fForeground) {
   else {
     _ClearTabJumpSession();
     _punct_jump_context = nullptr;
+    _punct_jump_waiting_reply = false;
+    _punct_jump_waiting_commit = false;
     _punct_jump_release = 0;
     m_client.FocusOut();
     _AbortComposition();

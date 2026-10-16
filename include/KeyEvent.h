@@ -15,6 +15,8 @@ struct KeyInfo {
 };
 
 namespace weasel {
+// Private frontend request; stripped before librime sees modifier bits.
+constexpr UINT kSnippetPunctCommitMask = 1u << 15;
 struct KeyEvent {
   UINT keycode : 16;
   UINT mask : 16;

@@ -39,6 +39,8 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
 
   _UpdateLanguageBar(_status);
 
+  _AcceptPunctuationCommit(ok && context->cursor_punct_split &&
+                           !commit.empty() && !_status.composing);
   bool compositionEnded = false;
   if (ok) {
     if (_cursor_tab_jump && !config.cursor_tab_jump)

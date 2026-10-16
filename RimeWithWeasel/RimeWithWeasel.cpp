@@ -443,6 +443,10 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
   if (m_disabled)
     return FALSE;
   RimeSessionId session_id = to_session_id(ipc_id);
+  const UINT split_modifier = keyEvent.mask & weasel::kSnippetPunctCommitMask;
+  // Retain the physical key identity if candidate navigation remaps it.
+  const UINT split_code = keyEvent.keycode;
+  keyEvent.mask &= ~weasel::kSnippetPunctCommitMask;
   const std::string cloud_clock = std::to_string(GetTickCount64());
   rime_api->set_property(session_id, "cloud_clock_ms", cloud_clock.c_str());
   // F34 is an internal polling notification, never a typing/selection key.
@@ -498,10 +502,17 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
     }
   }
 
+  const bool split_punctuation = split_modifier != 0;
+  const std::string split_key =
+      split_punctuation ? std::to_string(split_code) : "";
+  rime_api->set_property(session_id, "cursor_punct_split_request",
+                         split_key.c_str());
+  rime_api->set_property(session_id, "cursor_punct_split_done", "");
   if (!custom_key_processed) {
     handled = rime_api->process_key(session_id, keyEvent.keycode,
                                     expand_ibus_modifier(keyEvent.mask));
   }
+  rime_api->set_property(session_id, "cursor_punct_split_request", "");
   _ServiceCloud(session_id);
   // vim_mode when keydown only
   if (!handled && !(keyEvent.mask & ibus::Modifier::RELEASE_MASK)) {
@@ -1312,6 +1323,18 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
     body.append(L"ctx.undo=")
         .append(escape_string(u8tow(undo_action)))
         .append(L"\n");
+  }
+
+  char split_done[8] = {};
+  const bool split_completed =
+      rime_api->get_property(session_id, "cursor_punct_split_done", split_done,
+                             sizeof(split_done)) &&
+      std::string(split_done) == "1";
+  rime_api->set_property(session_id, "cursor_punct_split_done", "");
+  if (split_completed) {
+    if (std::find(actions.begin(), actions.end(), "ctx") == actions.end())
+      actions.push_back("ctx");
+    body.append(L"ctx.cursor_punct_split=1\n");
   }
 
   // configuration information

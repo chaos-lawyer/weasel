@@ -152,6 +152,8 @@ STDMETHODIMP CEndCompositionEditSession::DoEditSession(TfEditCookie ec) {
     _pTextService->_FinalizeComposition();
   HRESULT hr = _pComposition->EndComposition(ec);
   _pTextService->_CompleteCursorPlacement(ec, _pContext, _clear || FAILED(hr));
+  _pTextService->_CompletePunctuationCommit(_pContext,
+                                            !_clear && SUCCEEDED(hr));
   // Send undo only after the old composition's edit session has ended it.
   if (SUCCEEDED(hr) && _undoInputTag)
     _pTextService->_SimulateUndo(_undoInputTag);
@@ -476,8 +478,12 @@ class CDeferredPunctuationJump {
 bool WeaselTSF::_QueuePunctuationJump() {
   if (!_punct_jump_context)
     return true;
-  if (CDeferredPunctuationJump::Post(this, _punct_jump_serial))
+  if (_punct_jump_queued_serial == _punct_jump_serial)
     return true;
+  if (CDeferredPunctuationJump::Post(this, _punct_jump_serial)) {
+    _punct_jump_queued_serial = _punct_jump_serial;
+    return true;
+  }
   OutputDebugStringW(L"Weasel snippet: deferred punctuation post failed\n");
   _punct_jump_context = nullptr;
   return false;
@@ -920,6 +926,9 @@ STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
     TraceWordCommit(message);
   }
 
+  if (_pTextService->_punct_jump_waiting_commit &&
+      _pTextService->_punct_jump_context == _pContext)
+    _pTextService->_punct_jump_commit_written = true;
   _pTextService->_RememberLastCommit(ec, _pContext, pRange, text_to_insert);
 
   if (placeholder_count > 0 && !slots.empty()) {

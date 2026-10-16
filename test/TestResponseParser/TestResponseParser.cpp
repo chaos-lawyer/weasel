@@ -139,6 +139,27 @@ void test_cursor_punctuation_config() {
   BOOST_TEST(config.cursor_punct_jump_keys.empty());
 }
 
+void test_cursor_punctuation_split() {
+  WCHAR response[] =
+      L"action=commit,ctx\n"
+      L"commit=民法典\n"
+      L"ctx.cursor_punct_split=1\n";
+  std::wstring commit;
+  weasel::Context ctx;
+  weasel::Context empty;
+  weasel::ResponseParser parser(&commit, &ctx);
+  parser(response, wcslen(response));
+  BOOST_TEST(commit == L"民法典");
+  BOOST_TEST(ctx.cursor_punct_split);
+  BOOST_TEST(ctx != empty);
+  ctx.clear();
+  BOOST_TEST(!ctx.cursor_punct_split);
+  BOOST_TEST(ctx == empty);
+  WCHAR normal[] = L"action=ctx\nctx.preedit=继续\n";
+  parser(normal, wcslen(normal));
+  BOOST_TEST(!ctx.cursor_punct_split);
+}
+
 int _tmain(int argc, _TCHAR* argv[]) {
   test_1();
   test_2();
@@ -147,6 +168,7 @@ int _tmain(int argc, _TCHAR* argv[]) {
   test_5();
   test_cloud_pending();
   test_cursor_punctuation_config();
+  test_cursor_punctuation_split();
 
   system("pause");
   return boost::report_errors();
