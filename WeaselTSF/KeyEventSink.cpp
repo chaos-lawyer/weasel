@@ -19,8 +19,10 @@ LRESULT CALLBACK ReeditMouseProc(int code, WPARAM message, LPARAM data) {
   if (code >= 0 && (message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN ||
                     message == WM_MBUTTONDOWN || message == WM_XBUTTONDOWN ||
                     message == WM_MOUSEWHEEL || message == WM_MOUSEHWHEEL)) {
-    for (auto* owner : reeditMouseOwners)
+    for (auto* owner : reeditMouseOwners) {
       owner->_InvalidateBackspace();
+      owner->_ClearTabJumpSession();
+    }
   }
   return CallNextHookEx(nullptr, code, message, data);
 }
@@ -130,6 +132,36 @@ bool WeaselTSF::_ProcessKeyEvent(ITfContext* pContext,
   return true;
 }
 
+bool WeaselTSF::_HandleCursorInput(WPARAM key,
+                                   bool release,
+                                   bool test,
+                                   BOOL* eaten) {
+  const bool tagged =
+      static_cast<ULONG_PTR>(GetMessageExtraInfo()) == kCursorInputMarker;
+  if (!tagged && !(_cursor_input_active && (key == VK_LEFT || key == VK_RIGHT ||
+                                            key == VK_SHIFT || key == VK_F23)))
+    return false;
+  *eaten = key == VK_F23;
+  if (key == VK_F23 && release && !test)
+    _cursor_input_active = false;
+  return true;
+}
+
+void WeaselTSF::_TrackTabJumpKey(ITfContext* context, WPARAM key) {
+  if (!_HasActiveTabJumpSession())
+    return;
+  if (context != _tab_jump_context || _tab_jump_focus != GetFocus() ||
+      key == VK_ESCAPE || (key >= VK_PRIOR && key <= VK_DOWN) ||
+      (key == VK_TAB && (GetKeyState(VK_SHIFT) & 0x8000)) ||
+      ((GetKeyState(VK_CONTROL) & 0x8000) || (GetKeyState(VK_MENU) & 0x8000))) {
+    _ClearTabJumpSession();
+  } else if (key == VK_BACK || key == VK_DELETE || key == VK_SPACE ||
+             key == VK_RETURN || (key >= VK_NUMPAD0 && key <= VK_DIVIDE) ||
+             (key >= '0' && key <= 'Z') || key >= VK_OEM_1) {
+    _tab_jump_selection = false;
+  }
+}
+
 STDMETHODIMP WeaselTSF::OnSetFocus(BOOL fForeground) {
   if (fForeground)
     m_client.FocusIn();
@@ -156,21 +188,20 @@ STDMETHODIMP WeaselTSF::OnTestKeyDown(ITfContext* pContext,
                                       WPARAM wParam,
                                       LPARAM lParam,
                                       BOOL* pfEaten) {
+  if (_HandleCursorInput(wParam, false, true, pfEaten))
+    return S_OK;
+  _TrackTabJumpKey(pContext, wParam);
   _fTestKeyUpPending = FALSE;
   if (_fTestKeyDownPending) {
     *pfEaten = TRUE;
     return S_OK;
   }
-  if (_HasActiveTabJumpSession()) {
-    if (wParam == VK_ESCAPE) {
-      _ClearTabJumpSession();
-    } else if (wParam == VK_TAB && !(GetKeyState(VK_CONTROL) & 0x8000) &&
-               !(GetKeyState(VK_MENU) & 0x8000) &&
-               !(GetKeyState(VK_SHIFT) & 0x8000)) {
-      *pfEaten = TRUE;
-      _fTestKeyDownPending = TRUE;
-      return S_OK;
-    }
+  if (_HasActiveTabJumpSession() && !_IsComposing() && wParam == VK_TAB &&
+      !(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000) &&
+      !(GetKeyState(VK_SHIFT) & 0x8000)) {
+    *pfEaten = TRUE;
+    _fTestKeyDownPending = TRUE;
+    return S_OK;
   }
   if (_ProcessKeyEvent(pContext, wParam, lParam, pfEaten))
     _UpdateComposition(pContext);
@@ -183,24 +214,23 @@ STDMETHODIMP WeaselTSF::OnKeyDown(ITfContext* pContext,
                                   WPARAM wParam,
                                   LPARAM lParam,
                                   BOOL* pfEaten) {
+  if (_HandleCursorInput(wParam, false, false, pfEaten))
+    return S_OK;
+  _TrackTabJumpKey(pContext, wParam);
   _fTestKeyUpPending = FALSE;
+  if (_HasActiveTabJumpSession() && !_IsComposing() && wParam == VK_TAB &&
+      !(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000) &&
+      !(GetKeyState(VK_SHIFT) & 0x8000)) {
+    _fTestKeyDownPending = FALSE;
+    *pfEaten = _StepTabJump(pContext);
+    _tab_jump_keyup = *pfEaten != FALSE;
+    return S_OK;
+  }
   if (_fTestKeyDownPending) {
     _fTestKeyDownPending = FALSE;
     *pfEaten = TRUE;
-  } else {
-    if (_HasActiveTabJumpSession()) {
-      if (wParam == VK_ESCAPE) {
-        _ClearTabJumpSession();
-      } else if (wParam == VK_TAB && !(GetKeyState(VK_CONTROL) & 0x8000) &&
-                 !(GetKeyState(VK_MENU) & 0x8000) &&
-                 !(GetKeyState(VK_SHIFT) & 0x8000)) {
-        *pfEaten = TRUE;
-        _StepTabJump(pContext);
-        return S_OK;
-      }
-    }
-    if (_ProcessKeyEvent(pContext, wParam, lParam, pfEaten))
-      _UpdateComposition(pContext);
+  } else if (_ProcessKeyEvent(pContext, wParam, lParam, pfEaten)) {
+    _UpdateComposition(pContext);
   }
   return S_OK;
 }
@@ -209,6 +239,12 @@ STDMETHODIMP WeaselTSF::OnTestKeyUp(ITfContext* pContext,
                                     WPARAM wParam,
                                     LPARAM lParam,
                                     BOOL* pfEaten) {
+  if (_HandleCursorInput(wParam, true, true, pfEaten))
+    return S_OK;
+  if (wParam == VK_TAB && _tab_jump_keyup) {
+    *pfEaten = TRUE;
+    return S_OK;
+  }
   _fTestKeyDownPending = FALSE;
   if (_fTestKeyUpPending) {
     *pfEaten = TRUE;
@@ -225,6 +261,13 @@ STDMETHODIMP WeaselTSF::OnKeyUp(ITfContext* pContext,
                                 WPARAM wParam,
                                 LPARAM lParam,
                                 BOOL* pfEaten) {
+  if (_HandleCursorInput(wParam, true, false, pfEaten))
+    return S_OK;
+  if (wParam == VK_TAB && _tab_jump_keyup) {
+    _tab_jump_keyup = false;
+    *pfEaten = TRUE;
+    return S_OK;
+  }
   _fTestKeyDownPending = FALSE;
   if (_fTestKeyUpPending) {
     _fTestKeyUpPending = FALSE;
@@ -351,7 +394,8 @@ void WeaselTSF::_TrackReeditKey(WPARAM key, bool keyUp) {
   // Navigation, modifiers and mouse input invalidate both.
   const bool typing =
       !modified &&
-      (key == VK_SPACE || (key >= '0' && key <= '9') ||
+      (key == VK_SPACE || key == VK_RETURN ||
+       (key >= VK_NUMPAD0 && key <= VK_DIVIDE) || (key >= '0' && key <= '9') ||
        (key >= 'A' && key <= 'Z') || (key >= 0x60 && key <= 0x6f) ||
        (key >= 0xba && key <= 0xc0) || (key >= 0xdb && key <= 0xde) ||
        key == 0xe2);

@@ -170,6 +170,8 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   struct TabJumpTarget {
     com_ptr<ITfRange> range;
     bool is_selection = false;
+    LONG steps = 0;
+    LONG selection_length = 0;
   };
   static constexpr size_t kMaxCommitHistory = 10;
   void _CompleteBackspace();
@@ -177,6 +179,16 @@ class WeaselTSF : public ITfTextInputProcessorEx,
 
   /* Tab Jump / Snippet Session */
   bool _IsCursorTabJumpEnabled() const { return _cursor_tab_jump; }
+  static constexpr ULONG_PTR kCursorInputMarker = 0x57534352;
+  bool _HandleCursorInput(WPARAM key, bool release, bool test, BOOL* eaten);
+  bool _SendCursorKeys(WORD direction,
+                       LONG steps,
+                       LONG selectionLength,
+                       bool collapseSelection = false);
+  void _TrackTabJumpKey(ITfContext* context, WPARAM key);
+  void _CompleteCursorPlacement(TfEditCookie ec,
+                                ITfContext* context,
+                                bool clear);
   void _ClearTabJumpSession();
   bool _HasActiveTabJumpSession() const;
   bool _StepTabJump(ITfContext* pContext);
@@ -223,6 +235,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
                         bool* const scroll_next);
 
  private:
+  friend class CInsertTextEditSession;
   /* ui callback functions private */
   void _SelectCandidateOnCurrentPage(const size_t index);
   void _HandleMouseHoverEvent(const size_t index);
@@ -342,4 +355,13 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   com_ptr<ITfContext> _tab_jump_context;
   std::vector<TabJumpTarget> _tab_jump_targets;
   size_t _tab_jump_index = 0;
+  bool _tab_jump_keyup = false;
+  bool _tab_jump_keyboard = false;
+  bool _tab_jump_selection = false;
+  HWND _tab_jump_focus = nullptr;
+  bool _cursor_input_active = false;
+  com_ptr<ITfContext> _cursor_placement_context;
+  TabJumpTarget _cursor_placement;
+  bool _cursor_placement_keyboard = false;
+  HWND _cursor_placement_focus = nullptr;
 };

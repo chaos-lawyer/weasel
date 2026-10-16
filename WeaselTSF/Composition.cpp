@@ -151,6 +151,7 @@ STDMETHODIMP CEndCompositionEditSession::DoEditSession(TfEditCookie ec) {
   if (_pTextService && _pTextService->_IsCurrentComposition(_pComposition))
     _pTextService->_FinalizeComposition();
   HRESULT hr = _pComposition->EndComposition(ec);
+  _pTextService->_CompleteCursorPlacement(ec, _pContext, _clear || FAILED(hr));
   // Send undo only after the old composition's edit session has ended it.
   if (SUCCEEDED(hr) && _undoInputTag)
     _pTextService->_SimulateUndo(_undoInputTag);
@@ -519,9 +520,8 @@ class CTabJumpEditSession : public CEditSession {
     if (!_pRange || !_pContext)
       return E_FAIL;
     TF_SELECTION tfSelection = {};
-    if (!_is_selection) {
-      _pRange->Collapse(ec, TF_ANCHOR_END);
-    }
+    if (!_is_selection && FAILED(_pRange->Collapse(ec, TF_ANCHOR_END)))
+      return E_FAIL;
     tfSelection.range = _pRange;
     tfSelection.style.ase = TF_AE_NONE;
     tfSelection.style.fInterimChar = FALSE;
@@ -533,10 +533,137 @@ class CTabJumpEditSession : public CEditSession {
   bool _is_selection;
 };
 
+// Transitory text stores (including Chromium and IMM bridges) do not keep
+// document ranges after committing. Navigate their unchanged template suffix
+// with ordinary keys, delivered only after EndComposition releases its lock.
+static LONG CursorKeyCount(const std::wstring& text, size_t start, size_t end) {
+  LONG count = 0;
+  for (size_t i = start; i < end; ++i) {
+    if (i + 1 < end && ((text[i] >= 0xd800 && text[i] <= 0xdbff &&
+                         text[i + 1] >= 0xdc00 && text[i + 1] <= 0xdfff) ||
+                        (text[i] == L'\r' && text[i + 1] == L'\n')))
+      ++i;
+    ++count;
+  }
+  return count;
+}
+
+bool WeaselTSF::_SendCursorKeys(WORD direction,
+                                LONG steps,
+                                LONG selectionLength,
+                                bool collapseSelection) {
+  // Bound queued input and reject invalid movement before allocating it.
+  if (steps < 0 || steps > 4096 || selectionLength < 0 ||
+      selectionLength > 64 || (direction != VK_LEFT && direction != VK_RIGHT))
+    return false;
+  // Do not inherit the key used to select the candidate as a modifier.
+  if ((GetKeyState(VK_CONTROL) & 0x8000) || (GetKeyState(VK_MENU) & 0x8000) ||
+      (GetKeyState(VK_SHIFT) & 0x8000))
+    return false;
+  std::vector<INPUT> inputs;
+  auto key = [&](WORD vk, DWORD flags) {
+    INPUT input = {};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = vk;
+    input.ki.dwFlags = flags;
+    if (vk == VK_LEFT || vk == VK_RIGHT)
+      input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+    input.ki.dwExtraInfo = kCursorInputMarker;
+    inputs.push_back(input);
+  };
+  auto press = [&](WORD vk) {
+    key(vk, 0);
+    key(vk, KEYEVENTF_KEYUP);
+  };
+  if (collapseSelection)
+    press(VK_RIGHT);
+  for (LONG i = 0; i < steps; ++i)
+    press(direction);
+  if (selectionLength > 0) {
+    key(VK_SHIFT, 0);
+    for (LONG i = 0; i < selectionLength; ++i)
+      press(VK_RIGHT);
+    key(VK_SHIFT, KEYEVENTF_KEYUP);
+  }
+  // Drain even if TSF drops dwExtraInfo on the simulated navigation events.
+  press(VK_F23);
+  _cursor_input_active = true;
+  const UINT sent =
+      SendInput(static_cast<UINT>(inputs.size()), inputs.data(), sizeof(INPUT));
+  if (sent != inputs.size()) {
+    _cursor_input_active = false;
+    if (sent > 0) {
+      // Release exactly the keys whose key-down was accepted. A short batch
+      // must never leave an arrow or Shift logically held down.
+      std::vector<INPUT> releases;
+      for (UINT i = 0; i < sent; ++i) {
+        if (inputs[i].ki.dwFlags & KEYEVENTF_KEYUP)
+          continue;
+        bool released = false;
+        for (UINT j = i + 1; j < sent; ++j) {
+          if (inputs[j].ki.wVk == inputs[i].ki.wVk &&
+              (inputs[j].ki.dwFlags & KEYEVENTF_KEYUP)) {
+            released = true;
+            break;
+          }
+        }
+        if (!released) {
+          INPUT release = inputs[i];
+          release.ki.dwFlags |= KEYEVENTF_KEYUP;
+          releases.push_back(release);
+        }
+      }
+      if (!releases.empty())
+        SendInput(static_cast<UINT>(releases.size()), releases.data(),
+                  sizeof(INPUT));
+    }
+    return false;
+  }
+  return true;
+}
+
+void WeaselTSF::_CompleteCursorPlacement(TfEditCookie ec,
+                                         ITfContext* context,
+                                         bool clear) {
+  if (!_cursor_placement_context || context != _cursor_placement_context)
+    return;
+  const auto target = _cursor_placement;
+  const bool keyboard = _cursor_placement_keyboard;
+  const HWND focus = _cursor_placement_focus;
+  _cursor_placement_context = nullptr;
+  _cursor_placement = {};
+  if (clear || focus != GetFocus()) {
+    _ClearTabJumpSession();
+    return;
+  }
+  HRESULT hr = E_FAIL;
+  if (!keyboard && target.range) {
+    TF_SELECTION selection = {};
+    selection.range = target.range;
+    selection.style.ase = TF_AE_NONE;
+    hr = context->SetSelection(ec, 1, &selection);
+  }
+  if (FAILED(hr)) {
+    // Some persistent stores also reject selection/range operations. The
+    // caret is still at the commit end, so the same suffix fallback is safe.
+    _tab_jump_keyboard = true;
+    hr = _SendCursorKeys(VK_LEFT, target.steps, target.selection_length)
+             ? S_OK
+             : E_FAIL;
+  }
+  if (FAILED(hr)) {
+    OutputDebugStringW(L"Weasel snippet: initial cursor placement failed\n");
+    _ClearTabJumpSession();
+  }
+}
+
 void WeaselTSF::_ClearTabJumpSession() {
   _tab_jump_targets.clear();
   _tab_jump_index = 0;
   _tab_jump_context = nullptr;
+  _tab_jump_selection = false;
+  _cursor_placement_context = nullptr;
+  _cursor_placement = {};
 }
 
 bool WeaselTSF::_HasActiveTabJumpSession() const {
@@ -549,42 +676,38 @@ void WeaselTSF::_InitTabJumpSession(com_ptr<ITfContext> context,
   _tab_jump_context = context;
   _tab_jump_targets = std::move(targets);
   _tab_jump_index = 0;
+  _tab_jump_focus = GetFocus();
 }
 
 bool WeaselTSF::_StepTabJump(ITfContext* pContext) {
   if (!_HasActiveTabJumpSession())
     return false;
-
-  if (pContext != _tab_jump_context && pContext != nullptr) {
+  if (pContext != _tab_jump_context || _tab_jump_focus != GetFocus()) {
     _ClearTabJumpSession();
     return false;
   }
-
-  if (_tab_jump_index >= _tab_jump_targets.size()) {
-    _ClearTabJumpSession();
-    return false;
-  }
-
   const auto target = _tab_jump_targets[_tab_jump_index];
-  if (!target.range) {
+  bool ok = false;
+  if (_tab_jump_keyboard) {
+    ok = _SendCursorKeys(VK_RIGHT, target.steps, target.selection_length,
+                         _tab_jump_selection);
+  } else if (target.range) {
+    HRESULT hr = E_FAIL;
+    CTabJumpEditSession* session = new CTabJumpEditSession(
+        this, _tab_jump_context, target.range, target.is_selection);
+    const HRESULT request = _tab_jump_context->RequestEditSession(
+        _tfClientId, session, TF_ES_SYNC | TF_ES_READWRITE, &hr);
+    session->Release();
+    ok = SUCCEEDED(request) && hr == S_OK;
+  }
+  if (!ok) {
     _ClearTabJumpSession();
     return false;
   }
-
-  HRESULT hr = E_FAIL;
-  CTabJumpEditSession* session = new CTabJumpEditSession(
-      this, _tab_jump_context, target.range, target.is_selection);
-  if (session) {
-    _tab_jump_context->RequestEditSession(_tfClientId, session,
-                                          TF_ES_SYNC | TF_ES_READWRITE, &hr);
-    session->Release();
-  }
-
-  _tab_jump_index++;
-  if (_tab_jump_index >= _tab_jump_targets.size()) {
+  _tab_jump_selection = target.is_selection;
+  if (++_tab_jump_index >= _tab_jump_targets.size())
     _ClearTabJumpSession();
-  }
-  return SUCCEEDED(hr);
+  return true;
 }
 
 STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
@@ -638,62 +761,61 @@ STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
   _pTextService->_RememberLastCommit(ec, _pContext, pRange, text_to_insert);
 
   if (placeholder_count > 0 && !slots.empty()) {
-    com_ptr<ITfRange> initial_selection;
-    if (SUCCEEDED(pRange->Clone(&initial_selection)) && initial_selection) {
-      initial_selection->Collapse(ec, TF_ANCHOR_START);
-      LONG cchShifted = 0;
-      initial_selection->ShiftEnd(ec, slots[0].offset, &cchShifted, NULL);
-      initial_selection->Collapse(ec, TF_ANCHOR_END);
-      if (slots[0].length > 0) {
-        initial_selection->ShiftEnd(ec, slots[0].length, &cchShifted, NULL);
-      }
-      tfSelection.range = initial_selection;
-      tfSelection.style.ase = TF_AE_NONE;
-      tfSelection.style.fInterimChar = FALSE;
-      _pContext->SetSelection(ec, 1, &tfSelection);
-    }
-
+    _pTextService->_ClearTabJumpSession();
+    TF_STATUS status = {};
+    const bool keyboard = FAILED(_pContext->GetStatus(&status)) ||
+                          (status.dwStaticFlags & TF_SS_TRANSITORY);
+    auto makeRange = [&](const CursorSlot& slot) -> com_ptr<ITfRange> {
+      com_ptr<ITfRange> range;
+      LONG shifted = 0;
+      if (FAILED(pRange->Clone(&range)) || !range ||
+          FAILED(range->Collapse(ec, TF_ANCHOR_START)) ||
+          FAILED(range->ShiftEnd(ec, slot.offset, &shifted, NULL)) ||
+          shifted != slot.offset || FAILED(range->Collapse(ec, TF_ANCHOR_END)))
+        return nullptr;
+      if (slot.length > 0 &&
+          (FAILED(range->ShiftEnd(ec, slot.length, &shifted, NULL)) ||
+           shifted != slot.length))
+        return nullptr;
+      if (FAILED(range->SetGravity(
+              ec, TF_GRAVITY_FORWARD,
+              slot.length > 0 ? TF_GRAVITY_BACKWARD : TF_GRAVITY_FORWARD)))
+        return nullptr;
+      return range;
+    };
     if (_pTextService->_IsCursorTabJumpEnabled()) {
       std::vector<WeaselTSF::TabJumpTarget> targets;
-
-      for (size_t i = 1; i < slots.size(); ++i) {
-        com_ptr<ITfRange> slot_range;
-        if (SUCCEEDED(pRange->Clone(&slot_range)) && slot_range) {
-          slot_range->Collapse(ec, TF_ANCHOR_START);
-          LONG cch = 0;
-          slot_range->ShiftEnd(ec, slots[i].offset, &cch, NULL);
-          slot_range->Collapse(ec, TF_ANCHOR_END);
-          if (slots[i].length > 0) {
-            slot_range->ShiftEnd(ec, slots[i].length, &cch, NULL);
-          }
-          slot_range->SetGravity(ec, TF_GRAVITY_FORWARD, TF_GRAVITY_BACKWARD);
-          targets.push_back({slot_range, slots[i].length > 0});
-        }
+      for (size_t i = 1; i <= slots.size(); ++i) {
+        const CursorSlot slot =
+            i < slots.size()
+                ? slots[i]
+                : CursorSlot{static_cast<LONG>(text_to_insert.size()), 0};
+        const size_t previousEnd = slots[i - 1].offset + slots[i - 1].length;
+        targets.push_back(
+            {keyboard ? nullptr : makeRange(slot), slot.length > 0,
+             CursorKeyCount(text_to_insert, previousEnd, slot.offset),
+             slot.length});
       }
-
-      com_ptr<ITfRange> end_range;
-      if (SUCCEEDED(pRange->Clone(&end_range)) && end_range) {
-        end_range->Collapse(ec, TF_ANCHOR_END);
-        end_range->SetGravity(ec, TF_GRAVITY_FORWARD, TF_GRAVITY_FORWARD);
-        targets.push_back({end_range, false});
-      }
-
-      if (!targets.empty()) {
-        _pTextService->_InitTabJumpSession(_pContext, std::move(targets));
-      } else {
-        _pTextService->_ClearTabJumpSession();
-      }
-    } else {
-      _pTextService->_ClearTabJumpSession();
+      _pTextService->_InitTabJumpSession(_pContext, std::move(targets));
+      _pTextService->_tab_jump_keyboard = keyboard;
+      _pTextService->_tab_jump_selection = slots[0].length > 0;
     }
-  } else {
-    _pTextService->_ClearTabJumpSession();
-    pRange->Collapse(ec, TF_ANCHOR_END);
-    tfSelection.range = pRange;
-    tfSelection.style.ase = TF_AE_NONE;
-    tfSelection.style.fInterimChar = FALSE;
-    _pContext->SetSelection(ec, 1, &tfSelection);
+    // Save placement until EndComposition; hosts may force the caret to the
+    // commit end regardless of selections made while the text is composing.
+    _pTextService->_cursor_placement_context = _pContext;
+    _pTextService->_cursor_placement_focus = GetFocus();
+    _pTextService->_cursor_placement_keyboard = keyboard;
+    _pTextService->_cursor_placement = {
+        keyboard ? nullptr : makeRange(slots[0]), slots[0].length > 0,
+        CursorKeyCount(text_to_insert, slots[0].offset, text_to_insert.size()),
+        slots[0].length};
   }
+  // Ordinary commits inside a field must keep the remaining jump targets.
+  pRange->Collapse(ec, TF_ANCHOR_END);
+  tfSelection.range = pRange;
+  tfSelection.style.ase = TF_AE_NONE;
+  tfSelection.style.fInterimChar = FALSE;
+  _pContext->SetSelection(ec, 1, &tfSelection);
 
   return hRet;
 }
