@@ -186,6 +186,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
                        LONG selectionLength,
                        bool collapseSelection = false);
   void _TrackTabJumpKey(ITfContext* context, WPARAM key);
+  void _TrackTabJumpNavigation(WPARAM key);
   void _CompleteCursorPlacement(TfEditCookie ec,
                                 ITfContext* context,
                                 bool clear);
@@ -355,6 +356,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   com_ptr<ITfContext> _tab_jump_context;
   std::vector<TabJumpTarget> _tab_jump_targets;
   size_t _tab_jump_index = 0;
+  LONG _tab_jump_caret_offset = 0;
   bool _tab_jump_keyup = false;
   bool _tab_jump_keyboard = false;
   bool _tab_jump_selection = false;

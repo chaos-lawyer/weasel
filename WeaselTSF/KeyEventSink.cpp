@@ -150,15 +150,52 @@ bool WeaselTSF::_HandleCursorInput(WPARAM key,
 void WeaselTSF::_TrackTabJumpKey(ITfContext* context, WPARAM key) {
   if (!_HasActiveTabJumpSession())
     return;
+  const bool composing = _IsComposing();
+  const bool horizontal = key == VK_LEFT || key == VK_RIGHT;
+  const bool navigation = key >= VK_PRIOR && key <= VK_DOWN;
+  // Candidate paging and preedit navigation belong to Rime. Only document
+  // navigation can invalidate the relative distances used by fallback hosts.
   if (context != _tab_jump_context || _tab_jump_focus != GetFocus() ||
-      key == VK_ESCAPE || (key >= VK_PRIOR && key <= VK_DOWN) ||
-      ((GetKeyState(VK_CONTROL) & 0x8000) || (GetKeyState(VK_MENU) & 0x8000))) {
+      key == VK_ESCAPE ||
+      (!composing && ((navigation && !horizontal) ||
+                      (horizontal && (GetKeyState(VK_SHIFT) & 0x8000)) ||
+                      (GetKeyState(VK_CONTROL) & 0x8000) ||
+                      (GetKeyState(VK_MENU) & 0x8000)))) {
     _ClearTabJumpSession();
   } else if (key == VK_BACK || key == VK_DELETE || key == VK_SPACE ||
              key == VK_RETURN || (key >= VK_NUMPAD0 && key <= VK_DIVIDE) ||
              (key >= '0' && key <= 'Z') || key >= VK_OEM_1) {
     _tab_jump_selection = false;
   }
+}
+
+void WeaselTSF::_TrackTabJumpNavigation(WPARAM key) {
+  if (!_HasActiveTabJumpSession())
+    return;
+  if (key == VK_DELETE && _tab_jump_keyboard && _tab_jump_caret_offset > 0) {
+    --_tab_jump_caret_offset;
+    return;
+  }
+  if (key != VK_LEFT && key != VK_RIGHT)
+    return;
+  if (_tab_jump_keyboard) {
+    // The offset is the distance from the document caret to the current
+    // field end. Count actual key-down deliveries, never OnTestKeyDown calls.
+    if (_tab_jump_selection) {
+      _tab_jump_caret_offset =
+          key == VK_LEFT ? _tab_jump_targets[_tab_jump_index].selection_length
+                         : 0;
+    } else if (key == VK_LEFT) {
+      ++_tab_jump_caret_offset;
+    } else {
+      --_tab_jump_caret_offset;
+    }
+    if (_tab_jump_caret_offset < -4096 || _tab_jump_caret_offset > 4096) {
+      _ClearTabJumpSession();
+      return;
+    }
+  }
+  _tab_jump_selection = false;
 }
 
 STDMETHODIMP WeaselTSF::OnSetFocus(BOOL fForeground) {
@@ -230,6 +267,10 @@ STDMETHODIMP WeaselTSF::OnKeyDown(ITfContext* pContext,
   } else if (_ProcessKeyEvent(pContext, wParam, lParam, pfEaten)) {
     _UpdateComposition(pContext);
   }
+  // Only uneaten keys reach the document. Preedit/candidate arrow keys must
+  // not alter fallback distances, and repeated tests must not count twice.
+  if (!*pfEaten)
+    _TrackTabJumpNavigation(wParam);
   return S_OK;
 }
 

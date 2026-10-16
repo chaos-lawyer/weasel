@@ -50,6 +50,7 @@ struct WeaselTSF {
   bool _StepTabJump(ITfContext*, bool = false) { return false; }
   bool _HandleCursorInput(WPARAM, bool, bool, BOOL*) { return false; }
   void _TrackTabJumpKey(ITfContext*, WPARAM) {}
+  void _TrackTabJumpNavigation(WPARAM) {}
   bool _IsComposing() const { return false; }
   bool _tab_jump_keyup = false;
   int OnTestKeyDown(ITfContext*, WPARAM, LPARAM, BOOL*);

@@ -699,6 +699,7 @@ void WeaselTSF::_CompleteCursorPlacement(TfEditCookie ec,
 void WeaselTSF::_ClearTabJumpSession() {
   _tab_jump_targets.clear();
   _tab_jump_index = 0;
+  _tab_jump_caret_offset = 0;
   _tab_jump_context = nullptr;
   _tab_jump_selection = false;
   _cursor_placement_context = nullptr;
@@ -715,6 +716,7 @@ void WeaselTSF::_InitTabJumpSession(com_ptr<ITfContext> context,
   _tab_jump_context = context;
   _tab_jump_targets = std::move(targets);
   _tab_jump_index = 0;
+  _tab_jump_caret_offset = 0;
   _tab_jump_focus = GetFocus();
 }
 
@@ -732,8 +734,10 @@ bool WeaselTSF::_StepTabJump(ITfContext* pContext, bool backward) {
     const auto target = _tab_jump_targets[target_index];
     bool ok = false;
     if (_tab_jump_keyboard) {
-      ok = _SendCursorKeys(VK_LEFT, target.steps, target.selection_length,
-                           _tab_jump_selection);
+      const LONG movement = target.steps - _tab_jump_caret_offset;
+      ok = _SendCursorKeys(movement < 0 ? VK_RIGHT : VK_LEFT,
+                           movement < 0 ? -movement : movement,
+                           target.selection_length, _tab_jump_selection);
     } else if (target.range) {
       HRESULT hr = E_FAIL;
       CTabJumpEditSession* session = new CTabJumpEditSession(
@@ -748,6 +752,7 @@ bool WeaselTSF::_StepTabJump(ITfContext* pContext, bool backward) {
       return false;
     }
     _tab_jump_selection = target.is_selection;
+    _tab_jump_caret_offset = 0;
     _tab_jump_index = target_index;
     return true;
   } else {
@@ -759,8 +764,10 @@ bool WeaselTSF::_StepTabJump(ITfContext* pContext, bool backward) {
     const auto target = _tab_jump_targets[target_index];
     bool ok = false;
     if (_tab_jump_keyboard) {
-      ok = _SendCursorKeys(VK_RIGHT, target.steps, target.selection_length,
-                           _tab_jump_selection);
+      const LONG movement = target.steps + _tab_jump_caret_offset;
+      ok = _SendCursorKeys(movement < 0 ? VK_LEFT : VK_RIGHT,
+                           movement < 0 ? -movement : movement,
+                           target.selection_length, _tab_jump_selection);
     } else if (target.range) {
       HRESULT hr = E_FAIL;
       CTabJumpEditSession* session = new CTabJumpEditSession(
@@ -775,6 +782,7 @@ bool WeaselTSF::_StepTabJump(ITfContext* pContext, bool backward) {
       return false;
     }
     _tab_jump_selection = target.is_selection;
+    _tab_jump_caret_offset = 0;
     _tab_jump_index = target_index;
     if (_tab_jump_index + 1 >= _tab_jump_targets.size())
       _ClearTabJumpSession();
