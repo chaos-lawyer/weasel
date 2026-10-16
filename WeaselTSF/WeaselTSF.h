@@ -176,6 +176,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   void _SyncLastCommitFields();
 
   /* Tab Jump / Snippet Session */
+  bool _IsCursorTabJumpEnabled() const { return _cursor_tab_jump; }
   void _ClearTabJumpSession();
   bool _HasActiveTabJumpSession() const;
   bool _StepTabJump(ITfContext* pContext);

@@ -555,7 +555,7 @@ bool WeaselTSF::_StepTabJump(ITfContext* pContext) {
   if (!_HasActiveTabJumpSession())
     return false;
 
-  if (pContext != _tab_jump_context.get() && pContext != nullptr) {
+  if (pContext != _tab_jump_context && pContext != nullptr) {
     _ClearTabJumpSession();
     return false;
   }
@@ -653,7 +653,7 @@ STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
       _pContext->SetSelection(ec, 1, &tfSelection);
     }
 
-    if (_pTextService->_cursor_tab_jump) {
+    if (_pTextService->_IsCursorTabJumpEnabled()) {
       std::vector<WeaselTSF::TabJumpTarget> targets;
 
       for (size_t i = 1; i < slots.size(); ++i) {
