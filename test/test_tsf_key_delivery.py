@@ -28,6 +28,12 @@ using WPARAM = std::uintptr_t;
 using LPARAM = std::intptr_t;
 constexpr BOOL TRUE = 1, FALSE = 0;
 constexpr int S_OK = 0;
+constexpr int VK_TAB = 0x09;
+constexpr int VK_ESCAPE = 0x1B;
+constexpr int VK_SHIFT = 0x10;
+constexpr int VK_CONTROL = 0x11;
+constexpr int VK_MENU = 0x12;
+inline short GetKeyState(int) { return 0; }
 struct ITfContext {};
 struct WeaselTSF {
   BOOL _fTestKeyDownPending = FALSE, _fTestKeyUpPending = FALSE;
@@ -39,6 +45,9 @@ struct WeaselTSF {
     return true;
   }
   void _UpdateComposition(ITfContext*) {}
+  bool _HasActiveTabJumpSession() { return false; }
+  void _ClearTabJumpSession() {}
+  void _StepTabJump(ITfContext*) {}
   int OnTestKeyDown(ITfContext*, WPARAM, LPARAM, BOOL*);
   int OnKeyDown(ITfContext*, WPARAM, LPARAM, BOOL*);
   int OnTestKeyUp(ITfContext*, WPARAM, LPARAM, BOOL*);
