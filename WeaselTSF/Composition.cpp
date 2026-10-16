@@ -417,52 +417,174 @@ class CInsertTextEditSession : public CEditSession {
   com_ptr<ITfComposition> _pComposition;
 };
 
-static bool ParseCursorPlaceholders(const std::wstring& input,
-                                    std::wstring* output,
-                                    LONG* cursor_offset) {
-  if (!output || !cursor_offset)
-    return false;
+struct CursorSlot {
+  LONG offset;
+  LONG length;
+};
 
-  *output = input;
-  *cursor_offset = -1;
+static size_t ParseCursorPlaceholders(const std::wstring& input,
+                                      std::wstring* output,
+                                      std::vector<CursorSlot>* slots) {
+  if (!output || !slots)
+    return 0;
 
-  const std::wstring placeholders[] = {L"$|", L"$cursor", L"${cursor}"};
+  slots->clear();
 
-  bool found_any = false;
-  LONG first_cursor_pos = -1;
+  struct RawItem {
+    size_t pos;
+    size_t len;
+  };
 
-  size_t scan_idx = 0;
-  while (scan_idx < output->length()) {
-    size_t earliest_pos = std::wstring::npos;
-    size_t matched_len = 0;
+  std::vector<RawItem> found;
 
-    for (const auto& ph : placeholders) {
-      size_t pos = output->find(ph, scan_idx);
-      if (pos != std::wstring::npos) {
-        if (earliest_pos == std::wstring::npos || pos < earliest_pos) {
-          earliest_pos = pos;
-          matched_len = ph.length();
-        }
-      }
-    }
-
-    if (earliest_pos == std::wstring::npos) {
+  size_t idx = 0;
+  while (idx < input.length()) {
+    size_t doll = input.find(L'$', idx);
+    if (doll == std::wstring::npos) {
       break;
     }
 
-    found_any = true;
-    if (first_cursor_pos < 0) {
-      first_cursor_pos = static_cast<LONG>(earliest_pos);
+    size_t match_len = 0;
+    if (doll + 1 < input.length()) {
+      wchar_t c1 = input[doll + 1];
+      if (c1 == L'|') {
+        match_len = 2;
+      } else if (c1 >= L'1' && c1 <= L'9') {
+        match_len = 2;
+      } else if (c1 == L'{') {
+        if (doll + 8 < input.length() &&
+            input.compare(doll, 9, L"${cursor}") == 0) {
+          match_len = 9;
+        } else if (doll + 3 < input.length() && input[doll + 2] >= L'1' &&
+                   input[doll + 2] <= L'9' && input[doll + 3] == L'}') {
+          match_len = 4;
+        }
+      } else if (doll + 6 < input.length() &&
+                 input.compare(doll, 7, L"$cursor") == 0) {
+        match_len = 7;
+      }
     }
-    output->erase(earliest_pos, matched_len);
-    scan_idx = earliest_pos;
+
+    if (match_len > 0) {
+      found.push_back({doll, match_len});
+      idx = doll + match_len;
+    } else {
+      idx = doll + 1;
+    }
   }
 
-  if (found_any) {
-    *cursor_offset = first_cursor_pos;
-    return true;
+  if (found.empty()) {
+    *output = input;
+    return 0;
   }
-  return false;
+
+  if (found.size() == 1) {
+    // Single cursor placeholder: erase it, clean text without any placeholder!
+    *output = input;
+    output->erase(found[0].pos, found[0].len);
+    slots->push_back({static_cast<LONG>(found[0].pos), 0});
+    return 1;
+  }
+
+  // Multiple cursor placeholders:
+  // Show $1, $2, ... in the inserted output so the user sees jump positions
+  output->clear();
+  size_t last_pos = 0;
+  for (size_t i = 0; i < found.size(); ++i) {
+    output->append(input, last_pos, found[i].pos - last_pos);
+    std::wstring label = L"$" + std::to_wstring(i + 1);
+    LONG cur_offset = static_cast<LONG>(output->length());
+    LONG cur_len = static_cast<LONG>(label.length());
+    output->append(label);
+    slots->push_back({cur_offset, cur_len});
+    last_pos = found[i].pos + found[i].len;
+  }
+  if (last_pos < input.length()) {
+    output->append(input, last_pos, input.length() - last_pos);
+  }
+  return found.size();
+}
+
+class CTabJumpEditSession : public CEditSession {
+ public:
+  CTabJumpEditSession(com_ptr<WeaselTSF> pTextService,
+                      com_ptr<ITfContext> pContext,
+                      com_ptr<ITfRange> pRange,
+                      bool is_selection)
+      : CEditSession(pTextService, pContext),
+        _pRange(pRange),
+        _is_selection(is_selection) {}
+
+  STDMETHODIMP DoEditSession(TfEditCookie ec) override {
+    if (!_pRange || !_pContext)
+      return E_FAIL;
+    TF_SELECTION tfSelection = {};
+    if (!_is_selection) {
+      _pRange->Collapse(ec, TF_ANCHOR_END);
+    }
+    tfSelection.range = _pRange;
+    tfSelection.style.ase = TF_AE_NONE;
+    tfSelection.style.fInterimChar = FALSE;
+    return _pContext->SetSelection(ec, 1, &tfSelection);
+  }
+
+ private:
+  com_ptr<ITfRange> _pRange;
+  bool _is_selection;
+};
+
+void WeaselTSF::_ClearTabJumpSession() {
+  _tab_jump_targets.clear();
+  _tab_jump_index = 0;
+  _tab_jump_context = nullptr;
+}
+
+bool WeaselTSF::_HasActiveTabJumpSession() const {
+  return !_tab_jump_targets.empty() &&
+         _tab_jump_index < _tab_jump_targets.size();
+}
+
+void WeaselTSF::_InitTabJumpSession(com_ptr<ITfContext> context,
+                                    std::vector<TabJumpTarget>&& targets) {
+  _tab_jump_context = context;
+  _tab_jump_targets = std::move(targets);
+  _tab_jump_index = 0;
+}
+
+bool WeaselTSF::_StepTabJump(ITfContext* pContext) {
+  if (!_HasActiveTabJumpSession())
+    return false;
+
+  if (pContext != _tab_jump_context.get() && pContext != nullptr) {
+    _ClearTabJumpSession();
+    return false;
+  }
+
+  if (_tab_jump_index >= _tab_jump_targets.size()) {
+    _ClearTabJumpSession();
+    return false;
+  }
+
+  const auto target = _tab_jump_targets[_tab_jump_index];
+  if (!target.range) {
+    _ClearTabJumpSession();
+    return false;
+  }
+
+  HRESULT hr = E_FAIL;
+  CTabJumpEditSession* session = new CTabJumpEditSession(
+      this, _tab_jump_context, target.range, target.is_selection);
+  if (session) {
+    _tab_jump_context->RequestEditSession(_tfClientId, session,
+                                          TF_ES_SYNC | TF_ES_READWRITE, &hr);
+    session->Release();
+  }
+
+  _tab_jump_index++;
+  if (_tab_jump_index >= _tab_jump_targets.size()) {
+    _ClearTabJumpSession();
+  }
+  return SUCCEEDED(hr);
 }
 
 STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
@@ -489,12 +611,9 @@ STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
   }
 
   std::wstring text_to_insert;
-  LONG cursor_offset = -1;
-  const bool has_cursor_placeholder =
-      ParseCursorPlaceholders(_text, &text_to_insert, &cursor_offset);
-  if (!has_cursor_placeholder) {
-    text_to_insert = _text;
-  }
+  std::vector<CursorSlot> slots;
+  const size_t placeholder_count =
+      ParseCursorPlaceholders(_text, &text_to_insert, &slots);
 
   write_hr = pRange->SetText(ec, 0, text_to_insert.c_str(),
                              static_cast<LONG>(text_to_insert.length()));
@@ -518,21 +637,63 @@ STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
 
   _pTextService->_RememberLastCommit(ec, _pContext, pRange, text_to_insert);
 
-  /* update the selection to an insertion point */
-  if (has_cursor_placeholder && cursor_offset >= 0) {
-    pRange->Collapse(ec, TF_ANCHOR_START);
-    LONG cchShifted = 0;
-    pRange->ShiftEnd(ec, cursor_offset, &cchShifted, NULL);
-    pRange->Collapse(ec, TF_ANCHOR_END);
+  if (placeholder_count > 0 && !slots.empty()) {
+    com_ptr<ITfRange> initial_selection;
+    if (SUCCEEDED(pRange->Clone(&initial_selection)) && initial_selection) {
+      initial_selection->Collapse(ec, TF_ANCHOR_START);
+      LONG cchShifted = 0;
+      initial_selection->ShiftEnd(ec, slots[0].offset, &cchShifted, NULL);
+      initial_selection->Collapse(ec, TF_ANCHOR_END);
+      if (slots[0].length > 0) {
+        initial_selection->ShiftEnd(ec, slots[0].length, &cchShifted, NULL);
+      }
+      tfSelection.range = initial_selection;
+      tfSelection.style.ase = TF_AE_NONE;
+      tfSelection.style.fInterimChar = FALSE;
+      _pContext->SetSelection(ec, 1, &tfSelection);
+    }
+
+    if (_pTextService->_cursor_tab_jump) {
+      std::vector<WeaselTSF::TabJumpTarget> targets;
+
+      for (size_t i = 1; i < slots.size(); ++i) {
+        com_ptr<ITfRange> slot_range;
+        if (SUCCEEDED(pRange->Clone(&slot_range)) && slot_range) {
+          slot_range->Collapse(ec, TF_ANCHOR_START);
+          LONG cch = 0;
+          slot_range->ShiftEnd(ec, slots[i].offset, &cch, NULL);
+          slot_range->Collapse(ec, TF_ANCHOR_END);
+          if (slots[i].length > 0) {
+            slot_range->ShiftEnd(ec, slots[i].length, &cch, NULL);
+          }
+          slot_range->SetGravity(ec, TF_GRAVITY_FORWARD, TF_GRAVITY_BACKWARD);
+          targets.push_back({slot_range, slots[i].length > 0});
+        }
+      }
+
+      com_ptr<ITfRange> end_range;
+      if (SUCCEEDED(pRange->Clone(&end_range)) && end_range) {
+        end_range->Collapse(ec, TF_ANCHOR_END);
+        end_range->SetGravity(ec, TF_GRAVITY_FORWARD, TF_GRAVITY_FORWARD);
+        targets.push_back({end_range, false});
+      }
+
+      if (!targets.empty()) {
+        _pTextService->_InitTabJumpSession(_pContext, std::move(targets));
+      } else {
+        _pTextService->_ClearTabJumpSession();
+      }
+    } else {
+      _pTextService->_ClearTabJumpSession();
+    }
   } else {
+    _pTextService->_ClearTabJumpSession();
     pRange->Collapse(ec, TF_ANCHOR_END);
+    tfSelection.range = pRange;
+    tfSelection.style.ase = TF_AE_NONE;
+    tfSelection.style.fInterimChar = FALSE;
+    _pContext->SetSelection(ec, 1, &tfSelection);
   }
-
-  tfSelection.range = pRange;
-  tfSelection.style.ase = TF_AE_NONE;
-  tfSelection.style.fInterimChar = FALSE;
-
-  _pContext->SetSelection(ec, 1, &tfSelection);
 
   return hRet;
 }

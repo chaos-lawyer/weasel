@@ -134,6 +134,7 @@ STDMETHODIMP WeaselTSF::OnSetFocus(BOOL fForeground) {
   if (fForeground)
     m_client.FocusIn();
   else {
+    _ClearTabJumpSession();
     m_client.FocusOut();
     _AbortComposition();
   }
@@ -160,6 +161,17 @@ STDMETHODIMP WeaselTSF::OnTestKeyDown(ITfContext* pContext,
     *pfEaten = TRUE;
     return S_OK;
   }
+  if (_HasActiveTabJumpSession()) {
+    if (wParam == VK_ESCAPE) {
+      _ClearTabJumpSession();
+    } else if (wParam == VK_TAB && !(GetKeyState(VK_CONTROL) & 0x8000) &&
+               !(GetKeyState(VK_MENU) & 0x8000) &&
+               !(GetKeyState(VK_SHIFT) & 0x8000)) {
+      *pfEaten = TRUE;
+      _fTestKeyDownPending = TRUE;
+      return S_OK;
+    }
+  }
   if (_ProcessKeyEvent(pContext, wParam, lParam, pfEaten))
     _UpdateComposition(pContext);
   if (*pfEaten)
@@ -176,6 +188,17 @@ STDMETHODIMP WeaselTSF::OnKeyDown(ITfContext* pContext,
     _fTestKeyDownPending = FALSE;
     *pfEaten = TRUE;
   } else {
+    if (_HasActiveTabJumpSession()) {
+      if (wParam == VK_ESCAPE) {
+        _ClearTabJumpSession();
+      } else if (wParam == VK_TAB && !(GetKeyState(VK_CONTROL) & 0x8000) &&
+                 !(GetKeyState(VK_MENU) & 0x8000) &&
+                 !(GetKeyState(VK_SHIFT) & 0x8000)) {
+        *pfEaten = TRUE;
+        _StepTabJump(pContext);
+        return S_OK;
+      }
+    }
     if (_ProcessKeyEvent(pContext, wParam, lParam, pfEaten))
       _UpdateComposition(pContext);
   }

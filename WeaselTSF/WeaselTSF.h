@@ -167,9 +167,20 @@ class WeaselTSF : public ITfTextInputProcessorEx,
     com_ptr<ITfRange> end;
     std::wstring text;
   };
+  struct TabJumpTarget {
+    com_ptr<ITfRange> range;
+    bool is_selection = false;
+  };
   static constexpr size_t kMaxCommitHistory = 10;
   void _CompleteBackspace();
   void _SyncLastCommitFields();
+
+  /* Tab Jump / Snippet Session */
+  void _ClearTabJumpSession();
+  bool _HasActiveTabJumpSession() const;
+  bool _StepTabJump(ITfContext* pContext);
+  void _InitTabJumpSession(com_ptr<ITfContext> context,
+                           std::vector<TabJumpTarget>&& targets);
 
   void _RememberLastCommit(TfEditCookie ec,
                            com_ptr<ITfContext> context,
@@ -326,4 +337,8 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   ULONG_PTR _undo_input_tag = 0;
   HWND _undo_focus = nullptr;
   com_ptr<ITfContext> _undo_context;
+  bool _cursor_tab_jump = false;
+  com_ptr<ITfContext> _tab_jump_context;
+  std::vector<TabJumpTarget> _tab_jump_targets;
+  size_t _tab_jump_index = 0;
 };

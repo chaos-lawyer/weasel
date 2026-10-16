@@ -175,6 +175,7 @@ RimeWithWeaselHandler::RimeWithWeaselHandler(UI* ui)
       m_show_notifications_time(1200),
       m_base_configured_layout_type(UIStyle::LAYOUT_VERTICAL),
       m_base_fullscreen(false),
+      m_cursor_tab_jump(false),
       _UpdateUICallback(NULL) {
   m_ui->InServer() = true;
   rime_api = rime_get_api();
@@ -1303,6 +1304,9 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
   body.append(L"config.inline_preedit=")
       .append(std::to_wstring((int)session_status.style.inline_preedit))
       .append(L"\n");
+  body.append(L"config.cursor_tab_jump=")
+      .append(std::to_wstring((int)m_cursor_tab_jump))
+      .append(L"\n");
 
   // style
   if (!session_status.__synced) {
@@ -1844,6 +1848,7 @@ static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
                  style.candidate_abbreviate_length, 0, 0, _abs);
   _RimeGetBool(config, "style/inline_preedit", initialize,
                style.inline_preedit);
+  _RimeGetBool(config, "style/cursor_tab_jump", initialize, m_cursor_tab_jump);
   _RimeGetBool(config, "style/vertical_auto_reverse", initialize,
                style.vertical_auto_reverse);
   static constexpr Array<UIStyle::PreeditType, 3> _preeditArr = {

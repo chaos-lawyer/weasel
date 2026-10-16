@@ -132,6 +132,7 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   weasel::DynamicLayoutConfig m_base_dynamic_layout;
   weasel::UIStyle::LayoutType m_base_configured_layout_type;
   bool m_base_fullscreen;
+  bool m_cursor_tab_jump;
   std::map<std::string, bool> m_show_notifications;
   std::map<std::string, bool> m_show_notifications_base;
   std::function<void()> _UpdateUICallback;
