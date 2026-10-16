@@ -417,6 +417,54 @@ class CInsertTextEditSession : public CEditSession {
   com_ptr<ITfComposition> _pComposition;
 };
 
+static bool ParseCursorPlaceholders(const std::wstring& input,
+                                    std::wstring* output,
+                                    LONG* cursor_offset) {
+  if (!output || !cursor_offset)
+    return false;
+
+  *output = input;
+  *cursor_offset = -1;
+
+  const std::wstring placeholders[] = {L"$|", L"$cursor", L"${cursor}"};
+
+  bool found_any = false;
+  LONG first_cursor_pos = -1;
+
+  size_t scan_idx = 0;
+  while (scan_idx < output->length()) {
+    size_t earliest_pos = std::wstring::npos;
+    size_t matched_len = 0;
+
+    for (const auto& ph : placeholders) {
+      size_t pos = output->find(ph, scan_idx);
+      if (pos != std::wstring::npos) {
+        if (earliest_pos == std::wstring::npos || pos < earliest_pos) {
+          earliest_pos = pos;
+          matched_len = ph.length();
+        }
+      }
+    }
+
+    if (earliest_pos == std::wstring::npos) {
+      break;
+    }
+
+    found_any = true;
+    if (first_cursor_pos < 0) {
+      first_cursor_pos = static_cast<LONG>(earliest_pos);
+    }
+    output->erase(earliest_pos, matched_len);
+    scan_idx = earliest_pos;
+  }
+
+  if (found_any) {
+    *cursor_offset = first_cursor_pos;
+    return true;
+  }
+  return false;
+}
+
 STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
   com_ptr<ITfRange> pRange;
   TF_SELECTION tfSelection;
@@ -440,8 +488,16 @@ STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
     return E_FAIL;
   }
 
-  write_hr =
-      pRange->SetText(ec, 0, _text.c_str(), static_cast<LONG>(_text.length()));
+  std::wstring text_to_insert;
+  LONG cursor_offset = -1;
+  const bool has_cursor_placeholder =
+      ParseCursorPlaceholders(_text, &text_to_insert, &cursor_offset);
+  if (!has_cursor_placeholder) {
+    text_to_insert = _text;
+  }
+
+  write_hr = pRange->SetText(ec, 0, text_to_insert.c_str(),
+                             static_cast<LONG>(text_to_insert.length()));
   if (FAILED(write_hr)) {
     wchar_t message[192];
     swprintf_s(message,
@@ -456,14 +512,21 @@ STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
     swprintf_s(message,
                L"[weasel_tsf_commit_probe] event=write stage=set_text "
                L"result=ok utf16_units=%zu\n",
-               _text.size());
+               text_to_insert.size());
     TraceWordCommit(message);
   }
 
-  _pTextService->_RememberLastCommit(ec, _pContext, pRange, _text);
+  _pTextService->_RememberLastCommit(ec, _pContext, pRange, text_to_insert);
 
-  /* update the selection to an insertion point just past the inserted text. */
-  pRange->Collapse(ec, TF_ANCHOR_END);
+  /* update the selection to an insertion point */
+  if (has_cursor_placeholder && cursor_offset >= 0) {
+    pRange->Collapse(ec, TF_ANCHOR_START);
+    LONG cchShifted = 0;
+    pRange->ShiftEnd(ec, cursor_offset, &cchShifted, NULL);
+    pRange->Collapse(ec, TF_ANCHOR_END);
+  } else {
+    pRange->Collapse(ec, TF_ANCHOR_END);
+  }
 
   tfSelection.range = pRange;
   tfSelection.style.ase = TF_AE_NONE;
