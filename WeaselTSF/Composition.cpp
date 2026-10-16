@@ -434,6 +434,7 @@ static size_t ParseCursorPlaceholders(const std::wstring& input,
   struct RawItem {
     size_t pos;
     size_t len;
+    std::wstring custom_label;
   };
 
   std::vector<RawItem> found;
@@ -446,6 +447,8 @@ static size_t ParseCursorPlaceholders(const std::wstring& input,
     }
 
     size_t match_len = 0;
+    std::wstring custom_label;
+
     if (doll + 1 < input.length()) {
       wchar_t c1 = input[doll + 1];
       if (c1 == L'|') {
@@ -453,12 +456,33 @@ static size_t ParseCursorPlaceholders(const std::wstring& input,
       } else if (c1 >= L'1' && c1 <= L'9') {
         match_len = 2;
       } else if (c1 == L'{') {
-        if (doll + 8 < input.length() &&
-            input.compare(doll, 9, L"${cursor}") == 0) {
-          match_len = 9;
-        } else if (doll + 3 < input.length() && input[doll + 2] >= L'1' &&
-                   input[doll + 2] <= L'9' && input[doll + 3] == L'}') {
-          match_len = 4;
+        size_t close_brace = input.find(L'}', doll + 2);
+        if (close_brace != std::wstring::npos) {
+          std::wstring inside =
+              input.substr(doll + 2, close_brace - (doll + 2));
+          match_len = close_brace - doll + 1;
+          if (inside == L"cursor") {
+            // pure cursor without label
+          } else {
+            size_t colon = inside.find_first_of(L":：");
+            if (colon != std::wstring::npos) {
+              std::wstring after_colon = inside.substr(colon + 1);
+              if (!after_colon.empty()) {
+                custom_label = L"{" + after_colon + L"}";
+              }
+            } else {
+              bool all_digits = !inside.empty();
+              for (wchar_t ch : inside) {
+                if (ch < L'0' || ch > L'9') {
+                  all_digits = false;
+                  break;
+                }
+              }
+              if (!all_digits && !inside.empty()) {
+                custom_label = L"{" + inside + L"}";
+              }
+            }
+          }
         }
       } else if (doll + 6 < input.length() &&
                  input.compare(doll, 7, L"$cursor") == 0) {
@@ -467,7 +491,7 @@ static size_t ParseCursorPlaceholders(const std::wstring& input,
     }
 
     if (match_len > 0) {
-      found.push_back({doll, match_len});
+      found.push_back({doll, match_len, custom_label});
       idx = doll + match_len;
     } else {
       idx = doll + 1;
@@ -480,20 +504,35 @@ static size_t ParseCursorPlaceholders(const std::wstring& input,
   }
 
   if (found.size() == 1) {
-    // Single cursor placeholder: erase it, clean text without any placeholder!
-    *output = input;
-    output->erase(found[0].pos, found[0].len);
-    slots->push_back({static_cast<LONG>(found[0].pos), 0});
+    if (found[0].custom_label.empty()) {
+      // Single cursor placeholder without label: erase it, clean text without
+      // placeholder!
+      *output = input;
+      output->erase(found[0].pos, found[0].len);
+      slots->push_back({static_cast<LONG>(found[0].pos), 0});
+      return 1;
+    }
+    // Single cursor placeholder WITH custom label (e.g. ${合同名称}):
+    // Replace with custom label and select it so user can overwrite it!
+    output->clear();
+    output->append(input, 0, found[0].pos);
+    LONG cur_offset = static_cast<LONG>(output->length());
+    LONG cur_len = static_cast<LONG>(found[0].custom_label.length());
+    output->append(found[0].custom_label);
+    output->append(input, found[0].pos + found[0].len,
+                   input.length() - (found[0].pos + found[0].len));
+    slots->push_back({cur_offset, cur_len});
     return 1;
   }
 
   // Multiple cursor placeholders:
-  // Show $1, $2, ... in the inserted output so the user sees jump positions
   output->clear();
   size_t last_pos = 0;
   for (size_t i = 0; i < found.size(); ++i) {
     output->append(input, last_pos, found[i].pos - last_pos);
-    std::wstring label = L"$" + std::to_wstring(i + 1);
+    std::wstring label = found[i].custom_label.empty()
+                             ? (L"$" + std::to_wstring(i + 1))
+                             : found[i].custom_label;
     LONG cur_offset = static_cast<LONG>(output->length());
     LONG cur_len = static_cast<LONG>(label.length());
     output->append(label);
@@ -679,35 +718,68 @@ void WeaselTSF::_InitTabJumpSession(com_ptr<ITfContext> context,
   _tab_jump_focus = GetFocus();
 }
 
-bool WeaselTSF::_StepTabJump(ITfContext* pContext) {
+bool WeaselTSF::_StepTabJump(ITfContext* pContext, bool backward) {
   if (!_HasActiveTabJumpSession())
     return false;
   if (pContext != _tab_jump_context || _tab_jump_focus != GetFocus()) {
     _ClearTabJumpSession();
     return false;
   }
-  const auto target = _tab_jump_targets[_tab_jump_index];
-  bool ok = false;
-  if (_tab_jump_keyboard) {
-    ok = _SendCursorKeys(VK_RIGHT, target.steps, target.selection_length,
-                         _tab_jump_selection);
-  } else if (target.range) {
-    HRESULT hr = E_FAIL;
-    CTabJumpEditSession* session = new CTabJumpEditSession(
-        this, _tab_jump_context, target.range, target.is_selection);
-    const HRESULT request = _tab_jump_context->RequestEditSession(
-        _tfClientId, session, TF_ES_SYNC | TF_ES_READWRITE, &hr);
-    session->Release();
-    ok = SUCCEEDED(request) && hr == S_OK;
+  if (backward) {
+    if (_tab_jump_index == 0)
+      return true;
+    const size_t target_index = _tab_jump_index - 1;
+    const auto target = _tab_jump_targets[target_index];
+    bool ok = false;
+    if (_tab_jump_keyboard) {
+      ok = _SendCursorKeys(VK_LEFT, target.steps, target.selection_length,
+                           _tab_jump_selection);
+    } else if (target.range) {
+      HRESULT hr = E_FAIL;
+      CTabJumpEditSession* session = new CTabJumpEditSession(
+          this, _tab_jump_context, target.range, target.is_selection);
+      const HRESULT request = _tab_jump_context->RequestEditSession(
+          _tfClientId, session, TF_ES_SYNC | TF_ES_READWRITE, &hr);
+      session->Release();
+      ok = SUCCEEDED(request) && hr == S_OK;
+    }
+    if (!ok) {
+      _ClearTabJumpSession();
+      return false;
+    }
+    _tab_jump_selection = target.is_selection;
+    _tab_jump_index = target_index;
+    return true;
+  } else {
+    if (_tab_jump_index + 1 >= _tab_jump_targets.size()) {
+      _ClearTabJumpSession();
+      return false;
+    }
+    const size_t target_index = _tab_jump_index + 1;
+    const auto target = _tab_jump_targets[target_index];
+    bool ok = false;
+    if (_tab_jump_keyboard) {
+      ok = _SendCursorKeys(VK_RIGHT, target.steps, target.selection_length,
+                           _tab_jump_selection);
+    } else if (target.range) {
+      HRESULT hr = E_FAIL;
+      CTabJumpEditSession* session = new CTabJumpEditSession(
+          this, _tab_jump_context, target.range, target.is_selection);
+      const HRESULT request = _tab_jump_context->RequestEditSession(
+          _tfClientId, session, TF_ES_SYNC | TF_ES_READWRITE, &hr);
+      session->Release();
+      ok = SUCCEEDED(request) && hr == S_OK;
+    }
+    if (!ok) {
+      _ClearTabJumpSession();
+      return false;
+    }
+    _tab_jump_selection = target.is_selection;
+    _tab_jump_index = target_index;
+    if (_tab_jump_index + 1 >= _tab_jump_targets.size())
+      _ClearTabJumpSession();
+    return true;
   }
-  if (!ok) {
-    _ClearTabJumpSession();
-    return false;
-  }
-  _tab_jump_selection = target.is_selection;
-  if (++_tab_jump_index >= _tab_jump_targets.size())
-    _ClearTabJumpSession();
-  return true;
 }
 
 STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
@@ -785,12 +857,13 @@ STDMETHODIMP CInsertTextEditSession::DoEditSession(TfEditCookie ec) {
     };
     if (_pTextService->_IsCursorTabJumpEnabled()) {
       std::vector<WeaselTSF::TabJumpTarget> targets;
-      for (size_t i = 1; i <= slots.size(); ++i) {
+      for (size_t i = 0; i <= slots.size(); ++i) {
         const CursorSlot slot =
             i < slots.size()
                 ? slots[i]
                 : CursorSlot{static_cast<LONG>(text_to_insert.size()), 0};
-        const size_t previousEnd = slots[i - 1].offset + slots[i - 1].length;
+        const size_t previousEnd =
+            i > 0 ? (slots[i - 1].offset + slots[i - 1].length) : 0;
         targets.push_back(
             {keyboard ? nullptr : makeRange(slot), slot.length > 0,
              CursorKeyCount(text_to_insert, previousEnd, slot.offset),

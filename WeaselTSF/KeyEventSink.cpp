@@ -152,7 +152,6 @@ void WeaselTSF::_TrackTabJumpKey(ITfContext* context, WPARAM key) {
     return;
   if (context != _tab_jump_context || _tab_jump_focus != GetFocus() ||
       key == VK_ESCAPE || (key >= VK_PRIOR && key <= VK_DOWN) ||
-      (key == VK_TAB && (GetKeyState(VK_SHIFT) & 0x8000)) ||
       ((GetKeyState(VK_CONTROL) & 0x8000) || (GetKeyState(VK_MENU) & 0x8000))) {
     _ClearTabJumpSession();
   } else if (key == VK_BACK || key == VK_DELETE || key == VK_SPACE ||
@@ -197,8 +196,7 @@ STDMETHODIMP WeaselTSF::OnTestKeyDown(ITfContext* pContext,
     return S_OK;
   }
   if (_HasActiveTabJumpSession() && !_IsComposing() && wParam == VK_TAB &&
-      !(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000) &&
-      !(GetKeyState(VK_SHIFT) & 0x8000)) {
+      !(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000)) {
     *pfEaten = TRUE;
     _fTestKeyDownPending = TRUE;
     return S_OK;
@@ -219,10 +217,10 @@ STDMETHODIMP WeaselTSF::OnKeyDown(ITfContext* pContext,
   _TrackTabJumpKey(pContext, wParam);
   _fTestKeyUpPending = FALSE;
   if (_HasActiveTabJumpSession() && !_IsComposing() && wParam == VK_TAB &&
-      !(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000) &&
-      !(GetKeyState(VK_SHIFT) & 0x8000)) {
+      !(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000)) {
     _fTestKeyDownPending = FALSE;
-    *pfEaten = _StepTabJump(pContext);
+    const bool backward = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    *pfEaten = _StepTabJump(pContext, backward);
     _tab_jump_keyup = *pfEaten != FALSE;
     return S_OK;
   }

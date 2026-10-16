@@ -47,7 +47,7 @@ struct WeaselTSF {
   void _UpdateComposition(ITfContext*) {}
   bool _HasActiveTabJumpSession() { return false; }
   void _ClearTabJumpSession() {}
-  bool _StepTabJump(ITfContext*) { return false; }
+  bool _StepTabJump(ITfContext*, bool = false) { return false; }
   bool _HandleCursorInput(WPARAM, bool, bool, BOOL*) { return false; }
   void _TrackTabJumpKey(ITfContext*, WPARAM) {}
   bool _IsComposing() const { return false; }

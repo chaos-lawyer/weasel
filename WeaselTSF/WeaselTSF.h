@@ -191,7 +191,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
                                 bool clear);
   void _ClearTabJumpSession();
   bool _HasActiveTabJumpSession() const;
-  bool _StepTabJump(ITfContext* pContext);
+  bool _StepTabJump(ITfContext* pContext, bool backward = false);
   void _InitTabJumpSession(com_ptr<ITfContext> context,
                            std::vector<TabJumpTarget>&& targets);
 
