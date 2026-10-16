@@ -199,7 +199,10 @@ RimeWithWeaselHandler::~RimeWithWeaselHandler() {
 }
 
 bool add_session = false;
-void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize);
+void _UpdateUIStyle(RimeConfig* config,
+                    UI* ui,
+                    bool initialize,
+                    bool* cursor_tab_jump = nullptr);
 bool _UpdateUIStyleColor(RimeConfig* config,
                          UIStyle& style,
                          const std::string& color = std::string());
@@ -257,7 +260,7 @@ void RimeWithWeaselHandler::Initialize() {
   RimeConfig config = {NULL};
   if (rime_api->config_open("weasel", &config)) {
     if (m_ui) {
-      _UpdateUIStyle(&config, m_ui, true);
+      _UpdateUIStyle(&config, m_ui, true, &m_cursor_tab_jump);
       _UpdateShowNotifications(&config, true);
       m_current_dark_mode = IsUserDarkMode();
       if (m_current_dark_mode) {
@@ -393,7 +396,7 @@ void RimeWithWeaselHandler::UpdateColorTheme(BOOL darkMode) {
   RimeConfig config = {NULL};
   if (rime_api->config_open("weasel", &config)) {
     if (m_ui) {
-      _UpdateUIStyle(&config, m_ui, true);
+      _UpdateUIStyle(&config, m_ui, true, &m_cursor_tab_jump);
       m_current_dark_mode = darkMode;
       if (darkMode) {
         const int BUF_SIZE = 255;
@@ -870,7 +873,7 @@ void RimeWithWeaselHandler::_LoadSchemaSpecificSettings(
   }();
   _UpdateShowNotifications(&config);
   m_ui->style() = m_base_style;
-  _UpdateUIStyle(&config, m_ui, false);
+  _UpdateUIStyle(&config, m_ui, false, &m_cursor_tab_jump);
   SessionStatus& session_status = get_session_status(ipc_id);
   session_status.style = m_ui->style();
   UIStyle& style = session_status.style;
@@ -1818,7 +1821,10 @@ void RimeWithWeaselHandler::_RemapCandidateNavigationKey(
 }
 
 // update ui's style parameters, ui has been check before referenced
-static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
+static void _UpdateUIStyle(RimeConfig* config,
+                           UI* ui,
+                           bool initialize,
+                           bool* cursor_tab_jump = nullptr) {
   UIStyle& style(ui->style());
   const std::function<void(std::wstring&)> rmspace = [](std::wstring& str) {
     str = std::regex_replace(str, std::wregex(L"\\s*(,|:|^|$)\\s*"), L"$1");
@@ -1848,7 +1854,8 @@ static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
                  style.candidate_abbreviate_length, 0, 0, _abs);
   _RimeGetBool(config, "style/inline_preedit", initialize,
                style.inline_preedit);
-  _RimeGetBool(config, "style/cursor_tab_jump", initialize, m_cursor_tab_jump);
+  if (cursor_tab_jump)
+    _RimeGetBool(config, "style/cursor_tab_jump", initialize, *cursor_tab_jump);
   _RimeGetBool(config, "style/vertical_auto_reverse", initialize,
                style.vertical_auto_reverse);
   static constexpr Array<UIStyle::PreeditType, 3> _preeditArr = {
