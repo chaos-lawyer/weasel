@@ -145,7 +145,7 @@ bool WeaselTSF::_HandleCursorInput(WPARAM key,
   *eaten = key == VK_F23;
   if (key == VK_F23 && release && !test) {
     _cursor_input_active = false;
-    _FinishPunctuationJump();
+    _QueuePunctuationJump();
   }
   return true;
 }
@@ -193,29 +193,32 @@ bool WeaselTSF::_BeginPunctuationJump(ITfContext* context,
   _punct_jump_code = code;
   _punct_jump_mask = mask;
   _punct_jump_release = key;
+  ++_punct_jump_serial;
   if (!_StepTabJump(context, false, true)) {
     _punct_jump_context = nullptr;
     _punct_jump_release = 0;
     return false;
   }
-  if (!keyboard)
-    _FinishPunctuationJump();
+  if (!keyboard && !_QueuePunctuationJump()) {
+    _punct_jump_release = 0;
+    return false;
+  }
   return true;
 }
 
-void WeaselTSF::_FinishPunctuationJump() {
-  if (!_punct_jump_context)
+void WeaselTSF::_FinishPunctuationJump(UINT serial) {
+  if (serial != _punct_jump_serial || !_punct_jump_context)
     return;
   const auto context = _punct_jump_context;
   const HWND focus = _punct_jump_focus;
   const UINT code = _punct_jump_code;
   const UINT mask = _punct_jump_mask;
   _punct_jump_context = nullptr;
-  if (focus != GetFocus() || (_isToOpenClose && !_IsKeyboardOpen()) ||
-      _IsKeyboardDisabled())
+  if (focus != GetFocus() || _IsComposing() ||
+      (_isToOpenClose && !_IsKeyboardOpen()) || _IsKeyboardDisabled())
     return;
-  // In fallback hosts the cursor keys must reach the editor before Rime can
-  // commit punctuation. F23's release is the end-of-navigation barrier.
+  // Run outside the TSF key callbacks. Both native SetSelection and fallback
+  // key delivery may publish their actual editor selection only on return.
   const bool handled = m_client.ProcessKeyEvent(weasel::KeyEvent(code, mask));
   _UpdateComposition(context);
   if (!handled) {
@@ -329,15 +332,18 @@ STDMETHODIMP WeaselTSF::OnTestKeyDown(ITfContext* pContext,
     *pfEaten = TRUE;
     return S_OK;
   }
+  _snippet_test_action = SnippetKeyAction::None;
   UINT punctCode = 0, punctMask = 0;
   if (_MatchPunctuationJump(wParam, lParam, &punctCode, &punctMask)) {
     *pfEaten = TRUE;
+    _snippet_test_action = SnippetKeyAction::Punctuation;
     _fTestKeyDownPending = TRUE;
     return S_OK;
   }
   if (_HasActiveTabJumpSession() && !_IsComposing() && wParam == VK_TAB &&
       !(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000)) {
     *pfEaten = TRUE;
+    _snippet_test_action = SnippetKeyAction::Tab;
     _fTestKeyDownPending = TRUE;
     return S_OK;
   }
@@ -355,6 +361,18 @@ STDMETHODIMP WeaselTSF::OnKeyDown(ITfContext* pContext,
                                   BOOL* pfEaten) {
   if (_HandleCursorInput(wParam, false, false, pfEaten))
     return S_OK;
+  const auto tested_action = _snippet_test_action;
+  _snippet_test_action = SnippetKeyAction::None;
+  if (_fTestKeyDownPending && tested_action == SnippetKeyAction::None) {
+    // Rime already handled this physical key during OnTestKeyDown. It may
+    // have committed a template and created a new snippet in that callback;
+    // never reinterpret the same semicolon/Tab against the resulting state.
+    _fTestKeyDownPending = FALSE;
+    *pfEaten = TRUE;
+    return S_OK;
+  }
+  _fTestKeyDownPending = FALSE;
+  _fTestKeyUpPending = FALSE;
   UINT punctCode = 0, punctMask = 0;
   if (_MatchPunctuationJump(wParam, lParam, &punctCode, &punctMask)) {
     _fTestKeyDownPending = FALSE;
@@ -400,6 +418,7 @@ STDMETHODIMP WeaselTSF::OnTestKeyUp(ITfContext* pContext,
     *pfEaten = TRUE;
     return S_OK;
   }
+  _snippet_test_action = SnippetKeyAction::None;
   _fTestKeyDownPending = FALSE;
   if (_fTestKeyUpPending) {
     *pfEaten = TRUE;
@@ -428,6 +447,7 @@ STDMETHODIMP WeaselTSF::OnKeyUp(ITfContext* pContext,
     *pfEaten = TRUE;
     return S_OK;
   }
+  _snippet_test_action = SnippetKeyAction::None;
   _fTestKeyDownPending = FALSE;
   if (_fTestKeyUpPending) {
     _fTestKeyUpPending = FALSE;

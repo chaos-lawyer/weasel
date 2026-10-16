@@ -190,7 +190,8 @@ class WeaselTSF : public ITfTextInputProcessorEx,
                              WPARAM key,
                              UINT code,
                              UINT mask);
-  void _FinishPunctuationJump();
+  bool _QueuePunctuationJump();
+  void _FinishPunctuationJump(UINT serial);
   void _TrackTabJumpKey(ITfContext* context, WPARAM key);
   void _TrackTabJumpNavigation(WPARAM key);
   void _CompleteCursorPlacement(TfEditCookie ec,
@@ -368,6 +369,9 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   UINT _punct_jump_code = 0;
   UINT _punct_jump_mask = 0;
   WPARAM _punct_jump_release = 0;
+  UINT _punct_jump_serial = 0;
+  enum class SnippetKeyAction { None, Tab, Punctuation };
+  SnippetKeyAction _snippet_test_action = SnippetKeyAction::None;
   com_ptr<ITfContext> _tab_jump_context;
   std::vector<TabJumpTarget> _tab_jump_targets;
   size_t _tab_jump_index = 0;

@@ -37,6 +37,8 @@ constexpr int VK_MENU = 0x12;
 inline short GetKeyState(int) { return 0; }
 struct ITfContext {};
 struct WeaselTSF {
+  enum class SnippetKeyAction { None, Tab, Punctuation };
+  SnippetKeyAction _snippet_test_action = SnippetKeyAction::None;
   BOOL _fTestKeyDownPending = FALSE, _fTestKeyUpPending = FALSE;
   bool _async_edit = false;
   std::vector<WPARAM> sent;

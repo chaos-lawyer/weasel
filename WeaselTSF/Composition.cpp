@@ -418,6 +418,71 @@ class CInsertTextEditSession : public CEditSession {
   com_ptr<ITfComposition> _pComposition;
 };
 
+// Return to the host message loop after cursor movement before asking Rime
+// to insert punctuation. A TSF edit cookie or key marker is not that boundary.
+class CDeferredPunctuationJump {
+ public:
+  CDeferredPunctuationJump(com_ptr<WeaselTSF> service, UINT serial)
+      : _service(service), _serial(serial) {}
+
+  static bool Post(com_ptr<WeaselTSF> service, UINT serial) {
+    std::unique_ptr<CDeferredPunctuationJump> callback(
+        new CDeferredPunctuationJump(service, serial));
+    HWND window =
+        CreateWindowExW(0, L"STATIC", L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr,
+                        GetModuleHandleW(nullptr), nullptr);
+    if (!window)
+      return false;
+    SetWindowLongPtrW(window, GWLP_USERDATA,
+                      reinterpret_cast<LONG_PTR>(callback.get()));
+    if (GetWindowLongPtrW(window, GWLP_USERDATA) !=
+            reinterpret_cast<LONG_PTR>(callback.get()) ||
+        !SetWindowLongPtrW(window, GWLP_WNDPROC,
+                           reinterpret_cast<LONG_PTR>(&WindowProc))) {
+      SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+      DestroyWindow(window);
+      return false;
+    }
+    callback.release();  // The private window owns the service reference.
+    if (!PostMessageW(window, WM_APP, 0, 0)) {
+      DestroyWindow(window);
+      return false;
+    }
+    return true;
+  }
+
+ private:
+  static LRESULT CALLBACK WindowProc(HWND window,
+                                     UINT message,
+                                     WPARAM wParam,
+                                     LPARAM lParam) {
+    auto* callback = reinterpret_cast<CDeferredPunctuationJump*>(
+        GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (message == WM_APP && callback) {
+      callback->_service->_FinishPunctuationJump(callback->_serial);
+      DestroyWindow(window);
+      return 0;
+    }
+    if (message == WM_NCDESTROY && callback) {
+      SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+      delete callback;
+    }
+    return DefWindowProcW(window, message, wParam, lParam);
+  }
+  com_ptr<WeaselTSF> _service;
+  UINT _serial;
+};
+
+bool WeaselTSF::_QueuePunctuationJump() {
+  if (!_punct_jump_context)
+    return true;
+  if (CDeferredPunctuationJump::Post(this, _punct_jump_serial))
+    return true;
+  OutputDebugStringW(L"Weasel snippet: deferred punctuation post failed\n");
+  _punct_jump_context = nullptr;
+  return false;
+}
+
 struct CursorSlot {
   LONG offset;
   LONG length;
