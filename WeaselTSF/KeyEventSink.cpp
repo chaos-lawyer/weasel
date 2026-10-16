@@ -96,6 +96,12 @@ bool WeaselTSF::_ProcessKeyEvent(ITfContext* pContext,
     /* Unknown key event */
     *pfEaten = FALSE;
   } else {
+    if (_IsPunctuationReplayKey(wParam, keyUp)) {
+      if (!keyUp)
+        _punct_replay_started = true;
+      ke.keycode = _punct_jump_code;
+      ke.mask = _punct_jump_mask | (keyUp ? ibus::RELEASE_MASK : 0);
+    }
     // cheet key code when vertical auto reverse happened, swap up and down
     if (_cand->GetIsReposition()) {
       if (ke.keycode == ibus::Up)
@@ -133,6 +139,13 @@ bool WeaselTSF::_ProcessKeyEvent(ITfContext* pContext,
     prevKeyEvent = ke;
   }
   return true;
+}
+
+bool WeaselTSF::_IsPunctuationReplayKey(WPARAM key, bool release) {
+  return _punct_replay_pending && key == _punct_jump_physical &&
+         (!release || _punct_replay_started ||
+          static_cast<ULONG_PTR>(GetMessageExtraInfo()) ==
+              kPunctuationInputMarker);
 }
 
 bool WeaselTSF::_HandleCursorInput(WPARAM key,
@@ -200,6 +213,9 @@ bool WeaselTSF::_PreparePunctuationCommit(ITfContext* context,
   _punct_jump_code = code;
   _punct_jump_mask = mask;
   _punct_jump_physical = key;
+  // An asynchronous host may deliver key-up before reading the candidate
+  // response. Do not let that key-up overwrite the one-shot split reply.
+  _punct_jump_release = key;
   _punct_jump_waiting_reply = true;
   _punct_jump_waiting_commit = false;
   _punct_jump_commit_written = false;
@@ -243,6 +259,7 @@ bool WeaselTSF::_BeginPunctuationJump(ITfContext* context,
   _punct_jump_code = code;
   _punct_jump_mask = mask;
   _punct_jump_release = key;
+  _punct_jump_physical = key;
   ++_punct_jump_serial;
   if (!_StepTabJump(context, false, true)) {
     _punct_jump_context = nullptr;
@@ -262,7 +279,6 @@ void WeaselTSF::_FinishPunctuationJump(UINT serial) {
   _punct_jump_queued_serial = 0;
   const auto context = _punct_jump_context;
   const HWND focus = _punct_jump_focus;
-  const UINT code = _punct_jump_code;
   const UINT mask = _punct_jump_mask;
   if (focus != GetFocus() || _IsComposing() ||
       (_isToOpenClose && !_IsKeyboardOpen()) || _IsKeyboardDisabled()) {
@@ -282,33 +298,48 @@ void WeaselTSF::_FinishPunctuationJump(UINT serial) {
     return;
   }
   _punct_jump_context = nullptr;
-  // Run outside the TSF key callbacks. Both native SetSelection and fallback
-  // key delivery may publish their actual editor selection only on return.
-  const bool handled = m_client.ProcessKeyEvent(weasel::KeyEvent(code, mask));
-  _UpdateComposition(context);
-  if (!handled) {
-    // ASCII mode and pass-through schemas still receive the original symbol.
-    INPUT inputs[4] = {};
-    for (size_t i = 0; i < 2; ++i) {
-      auto& input = inputs[i];
-      input.type = INPUT_KEYBOARD;
-      input.ki.wScan = static_cast<WORD>(code);
-      input.ki.dwFlags = KEYEVENTF_UNICODE;
-      input.ki.dwExtraInfo = kCursorInputMarker;
+  // Re-enter through the host's input queue, after navigation. Word may
+  // defer TSF response reads requested from a message-window callback;
+  // sending Rime both down/up here overwrites the unread commit. WeChat also
+  // needs a real input boundary before it exposes the moved caret to TSF.
+  std::vector<INPUT> inputs;
+  auto append = [&](WORD key, DWORD flags, ULONG_PTR tag) {
+    INPUT input = {};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = key;
+    input.ki.dwFlags = flags;
+    input.ki.dwExtraInfo = tag;
+    inputs.push_back(input);
+  };
+  const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+  const bool wantedShift = (mask & ibus::SHIFT_MASK) != 0;
+  if (shift != wantedShift)
+    append(VK_SHIFT, wantedShift ? 0 : KEYEVENTF_KEYUP, kCursorInputMarker);
+  append(static_cast<WORD>(_punct_jump_physical), 0, kPunctuationInputMarker);
+  append(static_cast<WORD>(_punct_jump_physical), KEYEVENTF_KEYUP,
+         kPunctuationInputMarker);
+  if (shift != wantedShift)
+    append(VK_SHIFT, shift ? 0 : KEYEVENTF_KEYUP, kCursorInputMarker);
+  // Keep modifier restoration outside Rime even when TSF drops input tags.
+  append(VK_F23, 0, kCursorInputMarker);
+  append(VK_F23, KEYEVENTF_KEYUP, kCursorInputMarker);
+  _cursor_input_active = true;
+  _punct_replay_pending = true;
+  _punct_replay_started = false;
+  const UINT sent =
+      SendInput(static_cast<UINT>(inputs.size()), inputs.data(), sizeof(INPUT));
+  if (sent != inputs.size()) {
+    _cursor_input_active = false;
+    _punct_replay_pending = false;
+    // Restore any modifier changed by a partial batch, and release an
+    // accepted punctuation down so no synthetic key is left held.
+    for (UINT i = sent; sent > 0 && i < inputs.size(); ++i) {
+      if (inputs[i].ki.dwFlags & KEYEVENTF_KEYUP ||
+          inputs[i].ki.wVk == VK_SHIFT)
+        SendInput(1, &inputs[i], sizeof(INPUT));
     }
-    inputs[1].ki.dwFlags |= KEYEVENTF_KEYUP;
-    for (size_t i = 2; i < 4; ++i) {
-      inputs[i].type = INPUT_KEYBOARD;
-      inputs[i].ki.wVk = VK_F23;
-      inputs[i].ki.dwExtraInfo = kCursorInputMarker;
-    }
-    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
-    _cursor_input_active = true;
-    if (SendInput(4, inputs, sizeof(INPUT)) != 4)
-      _cursor_input_active = false;
+    OutputDebugStringW(L"Weasel snippet: punctuation replay input failed\n");
   }
-  m_client.ProcessKeyEvent(weasel::KeyEvent(code, mask | ibus::RELEASE_MASK));
-  _UpdateComposition(context);
 }
 
 void WeaselTSF::_TrackTabJumpKey(ITfContext* context, WPARAM key) {
@@ -371,6 +402,8 @@ STDMETHODIMP WeaselTSF::OnSetFocus(BOOL fForeground) {
     _punct_jump_waiting_reply = false;
     _punct_jump_waiting_commit = false;
     _punct_jump_release = 0;
+    _punct_replay_pending = false;
+    _punct_replay_started = false;
     m_client.FocusOut();
     _AbortComposition();
   }
@@ -428,6 +461,8 @@ STDMETHODIMP WeaselTSF::OnKeyDown(ITfContext* pContext,
                                   BOOL* pfEaten) {
   if (_HandleCursorInput(wParam, false, false, pfEaten))
     return S_OK;
+  if (_IsPunctuationReplayKey(wParam, false))
+    _punct_replay_started = true;
   const auto tested_action = _snippet_test_action;
   _snippet_test_action = SnippetKeyAction::None;
   if (_fTestKeyDownPending && tested_action == SnippetKeyAction::None) {
@@ -477,7 +512,8 @@ STDMETHODIMP WeaselTSF::OnTestKeyUp(ITfContext* pContext,
                                     BOOL* pfEaten) {
   if (_HandleCursorInput(wParam, true, true, pfEaten))
     return S_OK;
-  if (_punct_jump_release && wParam == _punct_jump_release) {
+  if (!_IsPunctuationReplayKey(wParam, true) && _punct_jump_release &&
+      wParam == _punct_jump_release) {
     *pfEaten = TRUE;
     return S_OK;
   }
@@ -495,6 +531,11 @@ STDMETHODIMP WeaselTSF::OnTestKeyUp(ITfContext* pContext,
     _UpdateComposition(pContext);
   if (*pfEaten)
     _fTestKeyUpPending = TRUE;
+  else if (_IsPunctuationReplayKey(wParam, true)) {
+    // A pass-through key has no OnKeyUp delivery callback.
+    _punct_replay_pending = false;
+    _punct_replay_started = false;
+  }
   return S_OK;
 }
 
@@ -504,7 +545,8 @@ STDMETHODIMP WeaselTSF::OnKeyUp(ITfContext* pContext,
                                 BOOL* pfEaten) {
   if (_HandleCursorInput(wParam, true, false, pfEaten))
     return S_OK;
-  if (_punct_jump_release && wParam == _punct_jump_release) {
+  if (!_IsPunctuationReplayKey(wParam, true) && _punct_jump_release &&
+      wParam == _punct_jump_release) {
     _punct_jump_release = 0;
     *pfEaten = TRUE;
     return S_OK;
@@ -522,6 +564,10 @@ STDMETHODIMP WeaselTSF::OnKeyUp(ITfContext* pContext,
   } else {
     if (_ProcessKeyEvent(pContext, wParam, lParam, pfEaten) && !_async_edit)
       _UpdateComposition(pContext);
+  }
+  if (_IsPunctuationReplayKey(wParam, true)) {
+    _punct_replay_pending = false;
+    _punct_replay_started = false;
   }
   return S_OK;
 }

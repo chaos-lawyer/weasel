@@ -41,6 +41,8 @@ struct WeaselTSF {
   SnippetKeyAction _snippet_test_action = SnippetKeyAction::None;
   BOOL _fTestKeyDownPending = FALSE, _fTestKeyUpPending = FALSE;
   bool _async_edit = false;
+  bool _punct_replay_pending = false, _punct_replay_started = false;
+  bool _IsPunctuationReplayKey(WPARAM, bool) { return false; }
   std::vector<WPARAM> sent;
   bool _ProcessKeyEvent(ITfContext*, WPARAM key, LPARAM, BOOL* eaten) {
     sent.push_back(key);

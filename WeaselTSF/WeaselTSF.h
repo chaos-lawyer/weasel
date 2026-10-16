@@ -180,6 +180,8 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   /* Tab Jump / Snippet Session */
   bool _IsCursorTabJumpEnabled() const { return _cursor_tab_jump; }
   static constexpr ULONG_PTR kCursorInputMarker = 0x57534352;
+  static constexpr ULONG_PTR kPunctuationInputMarker = 0x57535055;
+  bool _IsPunctuationReplayKey(WPARAM key, bool release);
   bool _HandleCursorInput(WPARAM key, bool release, bool test, BOOL* eaten);
   bool _SendCursorKeys(WORD direction,
                        LONG steps,
@@ -381,6 +383,8 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   UINT _punct_jump_serial = 0;
   UINT _punct_jump_queued_serial = 0;
   WPARAM _punct_jump_physical = 0;
+  bool _punct_replay_pending = false;
+  bool _punct_replay_started = false;
   bool _punct_jump_waiting_reply = false;
   bool _punct_jump_waiting_commit = false;
   bool _punct_jump_commit_written = false;
