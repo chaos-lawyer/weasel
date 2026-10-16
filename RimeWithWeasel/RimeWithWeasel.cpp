@@ -1824,7 +1824,7 @@ void RimeWithWeaselHandler::_RemapCandidateNavigationKey(
 static void _UpdateUIStyle(RimeConfig* config,
                            UI* ui,
                            bool initialize,
-                           bool* cursor_tab_jump = nullptr) {
+                           bool* cursor_tab_jump) {
   UIStyle& style(ui->style());
   const std::function<void(std::wstring&)> rmspace = [](std::wstring& str) {
     str = std::regex_replace(str, std::wregex(L"\\s*(,|:|^|$)\\s*"), L"$1");
