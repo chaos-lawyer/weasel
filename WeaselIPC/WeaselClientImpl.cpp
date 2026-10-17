@@ -223,6 +223,21 @@ bool ClientImpl::GetResponseData(ResponseHandler const& handler) {
   return ok;
 }
 
+bool ClientImpl::GetResponseSnapshot(std::wstring& response) {
+  response.clear();
+  const size_t body_bytes = channel.ResponseBodyBytes();
+  if (!body_bytes || body_bytes % sizeof(wchar_t) != 0)
+    return false;
+  const size_t body_units = body_bytes / sizeof(wchar_t);
+  ResponseHandler copy = [&](LPWSTR buffer, DWORD capacity) {
+    if (body_units > capacity)
+      return false;
+    response.assign(buffer, body_units);
+    return true;
+  };
+  return channel.HandleResponseData(copy);
+}
+
 bool ClientImpl::_WriteClientInfo() {
   channel << L"action=session\n";
   channel << L"session.client_app=" << app_name.c_str() << L"\n";
@@ -350,4 +365,8 @@ bool Client::Echo() {
 
 bool Client::GetResponseData(ResponseHandler handler) {
   return m_pImpl->GetResponseData(handler);
+}
+
+bool Client::GetResponseSnapshot(std::wstring& response) {
+  return m_pImpl->GetResponseSnapshot(response);
 }

@@ -257,6 +257,10 @@ class WeaselTSF : public ITfTextInputProcessorEx,
 
  private:
   friend class CInsertTextEditSession;
+  friend class CUpdateCompositionEditSession;
+  HRESULT _DoEditSession(TfEditCookie ec,
+                         com_ptr<ITfContext> editContext,
+                         std::wstring* response);
   /* ui callback functions private */
   void _SelectCandidateOnCurrentPage(const size_t index);
   void _HandleMouseHoverEvent(const size_t index);

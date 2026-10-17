@@ -6,6 +6,13 @@
 #include <WordCommitTrace.h>
 
 STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
+  return _DoEditSession(ec, _pEditSessionContext, nullptr);
+}
+
+HRESULT WeaselTSF::_DoEditSession(TfEditCookie ec,
+                                  com_ptr<ITfContext> editContext,
+                                  std::wstring* response) {
+  _pEditSessionContext = editContext;
   // get commit string from server
   std::wstring commit;
   weasel::Config config;
@@ -13,7 +20,10 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
   weasel::ResponseParser parser(&commit, context.get(), &_status, &config,
                                 &_cand->style());
 
-  bool ok = m_client.GetResponseData(std::ref(parser));
+  const bool ok =
+      response ? (!response->empty() &&
+                  parser(response->data(), static_cast<UINT>(response->size())))
+               : m_client.GetResponseData(std::ref(parser));
   {
     wchar_t message[256];
     swprintf_s(

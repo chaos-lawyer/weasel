@@ -28,6 +28,7 @@ class ClientImpl {
   void FocusOut();
   void TrayCommand(UINT menuId);
   bool GetResponseData(ResponseHandler const& handler);
+  bool GetResponseSnapshot(std::wstring& response);
 
  protected:
   void _InitializeClientInfo();

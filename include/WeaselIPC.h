@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <functional>
 #include <memory>
+#include <string>
 #include <KeyEvent.h>
 
 #define WEASEL_IPC_WINDOW L"WeaselIPCWindow_1.0"
@@ -146,6 +147,8 @@ class Client {
   void TrayCommand(UINT menuId);
   // 读取server返回的数据
   bool GetResponseData(ResponseHandler handler);
+  // Copy the current response before another IPC transaction reuses its buffer.
+  bool GetResponseSnapshot(std::wstring& response);
 
  private:
   ClientImpl* m_pImpl;

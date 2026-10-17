@@ -5,6 +5,8 @@
 #include "CandidateList.h"
 #include <WordCommitTrace.h>
 
+#include <utility>
+
 static void TraceWordCommit(const wchar_t* message) {
   OutputDebugStringW(message);
   weasel::AppendWordCommitTrace(message);
@@ -1616,20 +1618,43 @@ void WeaselTSF::_RollbackReopen(TfEditCookie ec, com_ptr<ITfContext> context) {
   _FinishReopen();
 }
 
+class CUpdateCompositionEditSession : public CEditSession {
+ public:
+  CUpdateCompositionEditSession(com_ptr<WeaselTSF> service,
+                                com_ptr<ITfContext> context,
+                                std::wstring response)
+      : CEditSession(service, context), response_(std::move(response)) {}
+
+  STDMETHODIMP DoEditSession(TfEditCookie ec) override {
+    return _pTextService->_DoEditSession(ec, _pContext, &response_);
+  }
+
+ private:
+  std::wstring response_;
+};
+
 void WeaselTSF::_UpdateComposition(com_ptr<ITfContext> pContext) {
   HRESULT session_hr = E_FAIL;
 
+  std::wstring response;
+  const bool captured = m_client.GetResponseSnapshot(response);
+  const size_t response_units = response.size();
+  com_ptr<CUpdateCompositionEditSession> session;
+  session.Attach(
+      new CUpdateCompositionEditSession(this, pContext, std::move(response)));
   _pEditSessionContext = pContext;
 
   const HRESULT request_hr = _pEditSessionContext->RequestEditSession(
-      _tfClientId, this, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE, &session_hr);
+      _tfClientId, session, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE, &session_hr);
   _async_edit = !!(session_hr == TF_S_ASYNC);
-  wchar_t message[224];
+  wchar_t message[256];
   swprintf_s(message,
              L"[word_commit_edit_probe] event=edit_request "
-             L"request_hr=0x%08lx session_hr=0x%08lx async=%d",
+             L"request_hr=0x%08lx session_hr=0x%08lx async=%d "
+             L"snapshot=%d snapshot_units=%zu",
              static_cast<unsigned long>(request_hr),
-             static_cast<unsigned long>(session_hr), _async_edit ? 1 : 0);
+             static_cast<unsigned long>(session_hr), _async_edit ? 1 : 0,
+             captured ? 1 : 0, response_units);
   weasel::AppendWordCommitTrace(message);
 }
 
