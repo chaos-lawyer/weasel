@@ -603,6 +603,7 @@ void RimeWithWeaselHandler::FocusOut(DWORD param, WeaselSessionId ipc_id) {
   rime_api->set_property(session, "cloud_native_identity", "");
   rime_api->set_property(session, "cloud_native_response", "");
   rime_api->set_property(session, "cloud_pending", "");
+  rime_api->set_property(session, "weasel_caret", "");
   DLOG(INFO) << "Focus out: ipc_id = " << ipc_id;
   if (m_ui)
     m_ui->Hide();
@@ -618,6 +619,32 @@ void RimeWithWeaselHandler::UpdateInputPosition(RECT const& rc,
     m_ui->UpdateInputPosition(rc);
   if (m_disabled)
     return;
+  // Reuse the position already supplied by TSF/IMM; never query the editor
+  // from a synchronous Lua key handler. Qt keeps each monitor's native origin
+  // while scaling coordinates within that monitor.
+  const auto session_id = to_session_id(ipc_id);
+  if (session_id) {
+    std::string caret;
+    if (rc.right >= rc.left && rc.bottom >= rc.top &&
+        (rc.right > rc.left || rc.bottom > rc.top)) {
+      MONITORINFO monitor = {sizeof(MONITORINFO)};
+      const auto screen = MonitorFromRect(&rc, MONITOR_DEFAULTTONEAREST);
+      if (GetMonitorInfoW(screen, &monitor)) {
+        UINT dpi_x = 96, dpi_y = 96;
+        using GetMonitorDpi = HRESULT(WINAPI*)(HMONITOR, int, UINT*, UINT*);
+        const auto shcore = GetModuleHandleW(L"shcore.dll");
+        const auto get_dpi = reinterpret_cast<GetMonitorDpi>(
+            GetProcAddress(shcore, "GetDpiForMonitor"));
+        if (!get_dpi || FAILED(get_dpi(screen, 0, &dpi_x, &dpi_y)))
+          dpi_x = 96;
+        caret = std::to_string(rc.left) + "," + std::to_string(rc.bottom) +
+                "," + std::to_string(monitor.rcMonitor.left) + "," +
+                std::to_string(monitor.rcMonitor.top) + "," +
+                std::to_string(dpi_x);
+      }
+    }
+    rime_api->set_property(session_id, "weasel_caret", caret.c_str());
+  }
   if (m_active_session != ipc_id) {
     _UpdateUI(ipc_id);
     m_active_session = ipc_id;
