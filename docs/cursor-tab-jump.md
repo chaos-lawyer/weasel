@@ -93,3 +93,9 @@ python3 tests/test_frontend_undo.py
 | 普通无占位符词条 | 正常上屏到末尾，Tab 保持原有行为。 |
 
 方向键兼容方式按模板中未改动的后缀计算距离，合并 UTF-16 代理对和 CRLF；组合附加符、ZWJ 表情序列、双向文本以及会自动改写模板后缀的编辑器插件，仍需单独实测。一次移动超过 4096 步、按住 Ctrl/Alt/Shift 选择模板、系统拒绝注入时会停止跳转。用户已在 `0.17.4.0.6d8bdbd` 验证 EmEditor 和 Chrome 正常。该版本的 Word 标点丢失、微信先输入标点后跳转，已补充异步响应与输入边界的模拟回归；本次实体按键重投递修复仍需在 Windows 上构建并实测。
+
+## CopyQ / QuickPanel 外部模板
+
+新增按活动 TSF 线程接收外部模板的接口。QuickPanel 恢复目标窗口焦点后提交模板，在实际异步写锁中校验当前上下文，再复用本文件所述解析、定位及跳转逻辑。c+Tab、Quicker 或其他启动入口使用相同接口；模板上屏不依赖先输入 Rime 编码。
+
+已有 YAML 策略与应用覆盖继续有效。普通剪贴板粘贴不识别占位符，QuickPanel 通过 `weasel_template_tabs` 指定模板标签页。具体配置、协议与验收步骤见 [QuickPanel 模板说明](../../CopyQ_QuickPanel/TEMPLATES.md)。

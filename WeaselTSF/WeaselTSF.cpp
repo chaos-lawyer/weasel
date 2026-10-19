@@ -38,6 +38,7 @@ WeaselTSF::WeaselTSF() {
 }
 
 WeaselTSF::~WeaselTSF() {
+  _UninitExternalTemplateWindow();
   _StopCloudPolling();
   _RemoveReeditMouseGuard();
   DllRelease();
@@ -99,6 +100,7 @@ STDMETHODIMP WeaselTSF::Activate(ITfThreadMgr* pThreadMgr,
 }
 
 STDMETHODIMP WeaselTSF::Deactivate() {
+  _UninitExternalTemplateWindow();
   _StopCloudPolling();
   m_client.EndSession();
 
@@ -165,6 +167,7 @@ STDMETHODIMP WeaselTSF::ActivateEx(ITfThreadMgr* pThreadMgr,
     goto ExitError;
 
   _EnsureServerConnected();
+  _InitExternalTemplateWindow();
 
   return S_OK;
 
@@ -251,9 +254,11 @@ STDMETHODIMP WeaselTSF::OnActivated(REFCLSID clsid,
   }
 
   if (isActivated) {
+    _InitExternalTemplateWindow();
     _ShowLanguageBar(TRUE);
     _UpdateLanguageBar(_status);
   } else {
+    _UninitExternalTemplateWindow();
     _DeleteCandidateList();
     _ShowLanguageBar(FALSE);
   }

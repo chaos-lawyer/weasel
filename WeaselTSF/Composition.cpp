@@ -4,6 +4,7 @@
 #include "ResponseParser.h"
 #include "CandidateList.h"
 #include <WordCommitTrace.h>
+#include <ExternalTemplate.h>
 
 #include <utility>
 
@@ -115,10 +116,12 @@ class CEndCompositionEditSession : public CEditSession {
                              com_ptr<ITfContext> pContext,
                              com_ptr<ITfComposition> pComposition,
                              BOOL clear = TRUE,
-                             ULONG_PTR undoInputTag = 0)
+                             ULONG_PTR undoInputTag = 0,
+                             HRESULT* completionResult = nullptr)
       : CEditSession(pTextService, pContext),
         _clear(clear),
-        _undoInputTag(undoInputTag) {
+        _undoInputTag(undoInputTag),
+        _completionResult(completionResult) {
     _pComposition = pComposition;
   }
 
@@ -129,9 +132,12 @@ class CEndCompositionEditSession : public CEditSession {
   com_ptr<ITfComposition> _pComposition;
   BOOL _clear;
   ULONG_PTR _undoInputTag;
+  HRESULT* _completionResult;
 };
 
 STDMETHODIMP CEndCompositionEditSession::DoEditSession(TfEditCookie ec) {
+  if (_completionResult)
+    *_completionResult = E_FAIL;
   /* Clear the dummy text we set before, if any. */
   if (_pComposition == nullptr)
     return S_OK;
@@ -153,6 +159,8 @@ STDMETHODIMP CEndCompositionEditSession::DoEditSession(TfEditCookie ec) {
   if (_pTextService && _pTextService->_IsCurrentComposition(_pComposition))
     _pTextService->_FinalizeComposition();
   HRESULT hr = _pComposition->EndComposition(ec);
+  if (_completionResult)
+    *_completionResult = hr;
   _pTextService->_CompleteCursorPlacement(ec, _pContext, _clear || FAILED(hr));
   _pTextService->_CompletePunctuationCommit(_pContext,
                                             !_clear && SUCCEEDED(hr));
@@ -1727,4 +1735,176 @@ BOOL WeaselTSF::_IsComposing() {
 
 BOOL WeaselTSF::_IsCurrentComposition(ITfComposition* pComposition) {
   return _pComposition != nullptr && _pComposition == pComposition;
+}
+
+// External templates enter the same CInsertTextEditSession path as Rime
+// commits. The sender never owns an edit cookie or a document range.
+class CExternalTemplateEditSession : public CEditSession {
+ public:
+  CExternalTemplateEditSession(com_ptr<WeaselTSF> service,
+                               com_ptr<ITfContext> context,
+                               HWND target,
+                               UINT id,
+                               std::wstring text)
+      : CEditSession(service, context),
+        _target(target),
+        _id(id),
+        _text(std::move(text)) {}
+  STDMETHODIMP DoEditSession(TfEditCookie ec) override {
+    return _pTextService->_ApplyExternalTemplate(ec, _pContext, _target, _id,
+                                                 _text);
+  }
+
+ private:
+  HWND _target;
+  UINT _id;
+  std::wstring _text;
+};
+
+void WeaselTSF::_InitExternalTemplateWindow() {
+  if (_external_template_window || !_pThreadMgr)
+    return;
+  WNDCLASSW cls = {};
+  cls.hInstance = g_hInst;
+  cls.lpszClassName = weasel::external_template::kWindowClass;
+  cls.lpfnWndProc = _ExternalTemplateWindowProc;
+  if (!RegisterClassW(&cls) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+    return;
+  _external_template_window =
+      CreateWindowExW(0, cls.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE,
+                      nullptr, g_hInst, nullptr);
+  if (_external_template_window)
+    SetWindowLongPtrW(_external_template_window, GWLP_USERDATA,
+                      reinterpret_cast<LONG_PTR>(this));
+}
+
+void WeaselTSF::_UninitExternalTemplateWindow() {
+  _external_template_status = weasel::external_template::Failed;
+  if (_external_template_window) {
+    SetWindowLongPtrW(_external_template_window, GWLP_USERDATA, 0);
+    DestroyWindow(_external_template_window);
+    _external_template_window = nullptr;
+    UnregisterClassW(weasel::external_template::kWindowClass, g_hInst);
+  }
+}
+
+LRESULT CALLBACK WeaselTSF::_ExternalTemplateWindowProc(HWND window,
+                                                        UINT message,
+                                                        WPARAM wParam,
+                                                        LPARAM lParam) {
+  auto* service =
+      reinterpret_cast<WeaselTSF*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+  if (service) {
+    if (message == WM_COPYDATA)
+      return service->_ReceiveExternalTemplate(
+          reinterpret_cast<const COPYDATASTRUCT*>(lParam));
+    if (message == weasel::external_template::kStatusMessage)
+      return wParam == service->_external_template_id
+                 ? service->_external_template_status
+                 : weasel::external_template::Rejected;
+  }
+  return DefWindowProcW(window, message, wParam, lParam);
+}
+
+bool WeaselTSF::_ExternalTemplateContextMatches(ITfContext* context,
+                                                HWND target) {
+  if (!_external_template_window || !_pThreadMgr || !target || !context ||
+      _IsKeyboardDisabled() || (_isToOpenClose && !_IsKeyboardOpen()) ||
+      _IsComposing() || _status.composing || _cursor_input_active ||
+      _punct_jump_context || _undo_input_active || _undo_context ||
+      _backspace_context || !_reopen_text.empty())
+    return false;
+  const HWND root = GetAncestor(target, GA_ROOT);
+  const HWND focus = GetFocus();
+  if (!root || GetForegroundWindow() != root || !focus ||
+      GetAncestor(focus, GA_ROOT) != root)
+    return false;
+  com_ptr<ITfDocumentMgr> document;
+  com_ptr<ITfContext> current;
+  return SUCCEEDED(_pThreadMgr->GetFocus(&document)) && document &&
+         SUCCEEDED(document->GetTop(&current)) && current == context;
+}
+
+LRESULT WeaselTSF::_ReceiveExternalTemplate(const COPYDATASTRUCT* data) {
+  using namespace weasel::external_template;
+  Request request;
+  if (!data || data->dwData != kCopyDataTag ||
+      !Decode(data->lpData, data->cbData, request))
+    return Rejected;
+  if (request.id == _external_template_id)
+    return _external_template_status;
+  if (_external_template_status == Pending)
+    return Rejected;
+  const HWND target =
+      reinterpret_cast<HWND>(static_cast<UINT_PTR>(request.target));
+  if (static_cast<uint64_t>(reinterpret_cast<UINT_PTR>(target)) !=
+      request.target)
+    return Rejected;
+  com_ptr<ITfDocumentMgr> document;
+  com_ptr<ITfContext> context;
+  if (!_pThreadMgr || FAILED(_pThreadMgr->GetFocus(&document)) || !document ||
+      FAILED(document->GetTop(&context)) ||
+      !_ExternalTemplateContextMatches(context, target) ||
+      !_EnsureServerConnected())
+    return Rejected;
+  // Refresh policy even when the panel was launched without a preceding
+  // Rime key. The response is consumed before any asynchronous edit request.
+  m_client.ProcessKeyEvent(weasel::KeyEvent(0));
+  weasel::Config config;
+  std::wstring commit;
+  weasel::ResponseParser parser(&commit, nullptr, &_status, &config,
+                                &_cand->style());
+  if (!m_client.GetResponseData(std::ref(parser)) || !commit.empty() ||
+      !_ExternalTemplateContextMatches(context, target))
+    return Rejected;
+  _cursor_tab_jump = config.cursor_tab_jump;
+  _cursor_punct_jump_keys = config.cursor_punct_jump_keys;
+  _cursor_punct_jump_any_field = config.cursor_punct_jump_any_field;
+  _external_template_id = request.id;
+  _external_template_status = Pending;
+  const std::wstring text(request.text.begin(), request.text.end());
+  com_ptr<CExternalTemplateEditSession> session;
+  session.Attach(new CExternalTemplateEditSession(this, context, target,
+                                                  request.id, text));
+  HRESULT result = E_FAIL;
+  const HRESULT hr = context->RequestEditSession(
+      _tfClientId, session, TF_ES_ASYNC | TF_ES_READWRITE, &result);
+  if (FAILED(hr) || (FAILED(result) && result != TF_S_ASYNC))
+    _external_template_status = Failed;
+  return _external_template_status;
+}
+
+HRESULT WeaselTSF::_ApplyExternalTemplate(TfEditCookie ec,
+                                          ITfContext* context,
+                                          HWND target,
+                                          UINT id,
+                                          const std::wstring& text) {
+  using namespace weasel::external_template;
+  if (id != _external_template_id || _external_template_status != Pending)
+    return S_FALSE;
+  if (!_ExternalTemplateContextMatches(context, target)) {
+    _external_template_status = Failed;
+    return E_FAIL;
+  }
+  // Perform start/write/end under one actual write lock. In particular Word
+  // may defer the request; never retain the sender's focus assumptions.
+  CStartCompositionEditSession start(this, context, FALSE);
+  HRESULT hr = start.DoEditSession(ec);
+  if (SUCCEEDED(hr) && _pComposition) {
+    _pEditSessionContext = context;
+    CInsertTextEditSession insert(this, context, _pComposition, text);
+    hr = insert.DoEditSession(ec);
+    HRESULT end_hr = E_FAIL;
+    CEndCompositionEditSession end(this, context, _pComposition, FALSE, 0,
+                                   &end_hr);
+    end.DoEditSession(ec);
+    if (SUCCEEDED(hr))
+      hr = end_hr;
+  } else {
+    hr = E_FAIL;
+  }
+  if (SUCCEEDED(hr))
+    _committed = TRUE;
+  _external_template_status = SUCCEEDED(hr) ? Applied : Failed;
+  return hr;
 }

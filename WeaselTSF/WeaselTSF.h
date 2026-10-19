@@ -177,6 +177,23 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   void _CompleteBackspace();
   void _SyncLastCommitFields();
 
+  void _InitExternalTemplateWindow();
+  void _UninitExternalTemplateWindow();
+  static LRESULT CALLBACK _ExternalTemplateWindowProc(HWND,
+                                                      UINT,
+                                                      WPARAM,
+                                                      LPARAM);
+  LRESULT _ReceiveExternalTemplate(const COPYDATASTRUCT* data);
+  bool _ExternalTemplateContextMatches(ITfContext* context, HWND target);
+  HRESULT _ApplyExternalTemplate(TfEditCookie ec,
+                                 ITfContext* context,
+                                 HWND target,
+                                 UINT id,
+                                 const std::wstring& text);
+  HWND _external_template_window = nullptr;
+  UINT _external_template_id = 0;
+  UINT _external_template_status = 0;
+
   /* Tab Jump / Snippet Session */
   bool _IsCursorTabJumpEnabled() const { return _cursor_tab_jump; }
   static constexpr ULONG_PTR kCursorInputMarker = 0x57534352;
