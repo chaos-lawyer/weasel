@@ -14,7 +14,7 @@ Configurator::~Configurator() {}
 
 void Configurator::Store(Deserializer::KeyType const& key,
                          std::wstring const& value) {
-  if (!m_pTarget->p_context || key.size() < 2)
+  if (!m_pTarget->p_config || key.size() < 2)
     return;
   bool bool_value = (!value.empty() && value != L"0");
   if (key[1] == L"inline_preedit") {

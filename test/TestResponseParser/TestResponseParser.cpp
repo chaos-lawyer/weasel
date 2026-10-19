@@ -124,9 +124,9 @@ void test_cursor_punctuation_config() {
       L"action=config\n"
       L"config.cursor_punct_jump_keys=\n"
       L"config.cursor_punct_jump_any_field=0\n";
-  weasel::Context ctx;
   weasel::Config config;
-  weasel::ResponseParser parser(nullptr, &ctx, nullptr, &config);
+  // External templates refresh policy without asking for candidate context.
+  weasel::ResponseParser parser(nullptr, nullptr, nullptr, &config);
   parser(enabled, wcslen(enabled));
   BOOST_TEST(config.cursor_tab_jump);
   BOOST_TEST(config.cursor_punct_jump_any_field);
