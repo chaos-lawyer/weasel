@@ -5,6 +5,7 @@
 #include "CandidateList.h"
 #include <WordCommitTrace.h>
 #include <ExternalTemplate.h>
+#include <ExternalCaret.h>
 
 #include <utility>
 
@@ -1780,6 +1781,7 @@ void WeaselTSF::_InitExternalTemplateWindow() {
 
 void WeaselTSF::_UninitExternalTemplateWindow() {
   _external_template_status = weasel::external_template::Failed;
+  _external_caret_deadline = 0;
   if (_external_template_window) {
     SetWindowLongPtrW(_external_template_window, GWLP_USERDATA, 0);
     DestroyWindow(_external_template_window);
@@ -1795,6 +1797,12 @@ LRESULT CALLBACK WeaselTSF::_ExternalTemplateWindowProc(HWND window,
   auto* service =
       reinterpret_cast<WeaselTSF*>(GetWindowLongPtrW(window, GWLP_USERDATA));
   if (service) {
+    if (message == WM_COPYDATA && lParam &&
+        reinterpret_cast<const COPYDATASTRUCT*>(lParam)->dwData ==
+            weasel::external_caret::kRequestTag)
+      return service->_ReceiveExternalCaret(
+          reinterpret_cast<HWND>(wParam),
+          reinterpret_cast<const COPYDATASTRUCT*>(lParam));
     if (message == WM_COPYDATA)
       return service->_ReceiveExternalTemplate(
           reinterpret_cast<const COPYDATASTRUCT*>(lParam));
@@ -1804,6 +1812,160 @@ LRESULT CALLBACK WeaselTSF::_ExternalTemplateWindowProc(HWND window,
                  : weasel::external_template::Rejected;
   }
   return DefWindowProcW(window, message, wParam, lParam);
+}
+
+class CExternalCaretEditSession : public CEditSession {
+ public:
+  CExternalCaretEditSession(com_ptr<WeaselTSF> service,
+                            com_ptr<ITfContext> context,
+                            UINT id,
+                            HWND target,
+                            HWND reply,
+                            DWORD replyPid,
+                            ULONGLONG deadline)
+      : CEditSession(service, context),
+        _id(id),
+        _target(target),
+        _reply(reply),
+        _replyPid(replyPid),
+        _deadline(deadline) {}
+  STDMETHODIMP DoEditSession(TfEditCookie ec) override {
+    return _pTextService->_ReadExternalCaret(ec, _pContext, _id, _target,
+                                             _reply, _replyPid, _deadline);
+  }
+
+ private:
+  UINT _id;
+  HWND _target;
+  HWND _reply;
+  DWORD _replyPid;
+  ULONGLONG _deadline;
+};
+
+bool WeaselTSF::_ExternalCaretContextMatches(ITfContext* context, HWND target) {
+  // Unlike insertion, this query also works in ASCII mode and during
+  // composition. It never changes the Rime session, selection, composition or
+  // document text.
+  if (!_external_template_window || !_pThreadMgr || !context || !target ||
+      _IsKeyboardDisabled())
+    return false;
+  const HWND root = GetAncestor(target, GA_ROOT);
+  const HWND focus = GetFocus();
+  if (!root || GetForegroundWindow() != root || !focus ||
+      GetAncestor(focus, GA_ROOT) != root)
+    return false;
+  com_ptr<ITfDocumentMgr> document;
+  com_ptr<ITfContext> current;
+  return SUCCEEDED(_pThreadMgr->GetFocus(&document)) && document &&
+         SUCCEEDED(document->GetTop(&current)) && current == context;
+}
+
+LRESULT WeaselTSF::_ReceiveExternalCaret(HWND sender,
+                                         const COPYDATASTRUCT* data) {
+  using namespace weasel::external_caret;
+  Request request;
+  const auto now = GetTickCount64();
+  if (!data || data->dwData != kRequestTag ||
+      !Decode(data->lpData, data->cbData, request) || !Valid(request, now) ||
+      _external_caret_deadline > now)
+    return 0;
+  const auto target =
+      reinterpret_cast<HWND>(static_cast<UINT_PTR>(request.target));
+  const auto reply =
+      reinterpret_cast<HWND>(static_cast<UINT_PTR>(request.reply));
+  if (static_cast<uint64_t>(reinterpret_cast<UINT_PTR>(target)) !=
+          request.target ||
+      static_cast<uint64_t>(reinterpret_cast<UINT_PTR>(reply)) !=
+          request.reply ||
+      reply != sender || !IsWindow(reply))
+    return 0;
+  DWORD replyPid = 0;
+  if (!GetWindowThreadProcessId(reply, &replyPid) || !replyPid)
+    return 0;
+  com_ptr<ITfDocumentMgr> document;
+  com_ptr<ITfContext> context;
+  if (!_pThreadMgr || FAILED(_pThreadMgr->GetFocus(&document)) || !document ||
+      FAILED(document->GetTop(&context)) ||
+      !_ExternalCaretContextMatches(context, target))
+    return 0;
+  _external_caret_id = request.id;
+  _external_caret_deadline = request.deadline;
+  com_ptr<CExternalCaretEditSession> session;
+  session.Attach(new CExternalCaretEditSession(
+      this, context, request.id, target, reply, replyPid, request.deadline));
+  HRESULT result = E_FAIL;
+  const HRESULT hr = context->RequestEditSession(
+      _tfClientId, session, TF_ES_ASYNCDONTCARE | TF_ES_READ, &result);
+  if (FAILED(hr) || (FAILED(result) && result != TF_S_ASYNC)) {
+    _external_caret_deadline = 0;
+    return 0;
+  }
+  return 1;
+}
+
+HRESULT WeaselTSF::_ReadExternalCaret(TfEditCookie ec,
+                                      ITfContext* context,
+                                      UINT id,
+                                      HWND target,
+                                      HWND replyWindow,
+                                      DWORD replyPid,
+                                      ULONGLONG deadline) {
+  using namespace weasel::external_caret;
+  if (id != _external_caret_id || deadline != _external_caret_deadline ||
+      GetTickCount64() >= deadline)
+    return S_OK;
+  Reply reply;
+  reply.id = id;
+  reply.target = reinterpret_cast<UINT_PTR>(target);
+  if (_ExternalCaretContextMatches(context, target)) {
+    TF_SELECTION selection = {};
+    ULONG count = 0;
+    const HRESULT selected =
+        context->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &selection, &count);
+    com_ptr<ITfRange> selectedRange;
+    selectedRange.Attach(selection.range);
+    com_ptr<ITfRange> caretRange;
+    com_ptr<ITfContextView> view;
+    RECT rc = {};
+    RECT bounds = {};
+    BOOL clipped = FALSE;
+    if (SUCCEEDED(selected) && count == 1 && selectedRange &&
+        SUCCEEDED(selectedRange->Clone(&caretRange)) && caretRange &&
+        SUCCEEDED(caretRange->Collapse(ec, selection.style.ase == TF_AE_START
+                                               ? TF_ANCHOR_START
+                                               : TF_ANCHOR_END)) &&
+        SUCCEEDED(context->GetActiveView(&view)) && view &&
+        SUCCEEDED(view->GetTextExt(ec, caretRange, &rc, &clipped)) &&
+        !clipped && rc.right >= rc.left && rc.bottom > rc.top &&
+        GetWindowRect(target, &bounds) && rc.left >= bounds.left &&
+        rc.left < bounds.right && rc.top >= bounds.top &&
+        rc.top < bounds.bottom) {
+      reply.available = true;
+      reply.left = rc.left;
+      reply.top = rc.top;
+      reply.right = rc.right;
+      reply.bottom = rc.bottom;
+    }
+  }
+  _external_caret_deadline = 0;
+  DWORD currentPid = 0;
+  if (GetTickCount64() >= deadline ||
+      !_ExternalCaretContextMatches(context, target) ||
+      !IsWindow(replyWindow) ||
+      !GetWindowThreadProcessId(replyWindow, &currentPid) ||
+      currentPid != replyPid)
+    return S_OK;
+  const auto wire = Encode(reply);
+  COPYDATASTRUCT packet = {};
+  packet.dwData = kReplyTag;
+  packet.cbData = static_cast<DWORD>(wire.size());
+  packet.lpData = const_cast<uint8_t*>(wire.data());
+  DWORD_PTR delivered = 0;
+  SendMessageTimeoutW(replyWindow, WM_COPYDATA,
+                      reinterpret_cast<WPARAM>(_external_template_window),
+                      reinterpret_cast<LPARAM>(&packet),
+                      SMTO_ABORTIFHUNG | SMTO_ERRORONEXIT, 20, &delivered);
+  return S_OK;
 }
 
 bool WeaselTSF::_ExternalTemplateContextMatches(ITfContext* context,

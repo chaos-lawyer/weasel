@@ -194,6 +194,18 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   UINT _external_template_id = 0;
   UINT _external_template_status = 0;
 
+  LRESULT _ReceiveExternalCaret(HWND sender, const COPYDATASTRUCT* data);
+  bool _ExternalCaretContextMatches(ITfContext* context, HWND target);
+  HRESULT _ReadExternalCaret(TfEditCookie ec,
+                             ITfContext* context,
+                             UINT id,
+                             HWND target,
+                             HWND reply,
+                             DWORD replyPid,
+                             ULONGLONG deadline);
+  UINT _external_caret_id = 0;
+  ULONGLONG _external_caret_deadline = 0;
+
   /* Tab Jump / Snippet Session */
   bool _IsCursorTabJumpEnabled() const { return _cursor_tab_jump; }
   static constexpr ULONG_PTR kCursorInputMarker = 0x57534352;
